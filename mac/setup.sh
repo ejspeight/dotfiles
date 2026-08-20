@@ -7,10 +7,10 @@
 #
 #  What this installs:
 #    - Homebrew + formulae (git, neovim, go, node/nvm, rust, lazygit,
-#      ripgrep, fd, fzf, jq, gh, bat, eza, zoxide, awscli, docker, ...)
-#    - Homebrew casks (Warp, Rectangle, DBeaver, Raycast, 1Password, ...)
+#      ripgrep, fd, fzf, jq, gh, bat, eza, zoxide, Atuin, Starship, ...)
+#    - Homebrew casks (Ghostty, Codex, Warp, Rectangle, 1Password, ...)
 #    - Oh My Zsh + zsh-autosuggestions + zsh-syntax-highlighting
-#    - Custom eastwood zsh theme
+#    - Minimal Catppuccin Ghostty and Starship configuration
 #    - LazyVim (Neovim distribution)
 #    - Node via NVM (v23)
 #    - Rust via rustup (stable)
@@ -18,6 +18,11 @@
 # =============================================================================
 
 set -e
+
+readonly SCRIPT_DIR="${0:A:h}"
+readonly CONFIG_DIR="$SCRIPT_DIR/config"
+readonly BACKUP_STAMP="$(date +%Y%m%d-%H%M%S)"
+readonly BACKUP_DIR="$HOME/.config-backups/dotfiles-$BACKUP_STAMP"
 
 # ── Colours ───────────────────────────────────────────────────────────────────
 BOLD=$(tput bold)
@@ -29,6 +34,29 @@ RESET=$(tput sgr0)
 info()    { echo "${CYAN}${BOLD}==> $*${RESET}"; }
 success() { echo "${GREEN}${BOLD}✔  $*${RESET}"; }
 warn()    { echo "${YELLOW}${BOLD}!  $*${RESET}"; }
+
+install_config() {
+  local source_file="$1"
+  local target_file="$2"
+  local mode="${3:-0644}"
+
+  if [ ! -f "$source_file" ]; then
+    warn "Missing config asset: $source_file"
+    return 1
+  fi
+
+  if [ -e "$target_file" ] || [ -L "$target_file" ]; then
+    local relative_path="${target_file#$HOME/}"
+    local backup_file="$BACKUP_DIR/$relative_path"
+    mkdir -p "${backup_file:h}"
+    cp -pL "$target_file" "$backup_file"
+    [ -L "$target_file" ] && rm "$target_file"
+  fi
+
+  mkdir -p "${target_file:h}"
+  cp "$source_file" "$target_file"
+  chmod "$mode" "$target_file"
+}
 
 echo ""
 echo "${BOLD}Mac Dev Environment Setup${RESET}"
@@ -97,6 +125,8 @@ FORMULAE=(
   docker-compose
 
   # Shell
+  atuin
+  starship
   zsh
 )
 
@@ -114,9 +144,11 @@ info "Installing Homebrew casks..."
 
 CASKS=(
   1password
+  codex
   dbeaver-community
   dotnet-sdk
   font-jetbrains-mono-nerd-font
+  ghostty
   raycast
   rectangle
   warp
@@ -172,82 +204,18 @@ else
   success "zsh-syntax-highlighting already installed."
 fi
 
-# ── Custom Zsh Theme (eastwood) ───────────────────────────────────────────────
-info "Writing eastwood zsh theme..."
-mkdir -p "$HOME/.zsh/themes"
+# ── Terminal configuration ────────────────────────────────────────────────────
+info "Installing terminal configuration..."
 
-cat > "$HOME/.zsh/themes/eastwood.zsh-theme" << 'THEME'
-ZSH_THEME_GIT_PROMPT_PREFIX="%{$reset_color%}%{$fg[green]%}["
-ZSH_THEME_GIT_PROMPT_SUFFIX="]%{$reset_color%}"
-ZSH_THEME_GIT_PROMPT_DIRTY="%{$fg[red]%}*%{$reset_color%}"
-ZSH_THEME_GIT_PROMPT_CLEAN=""
+install_config "$CONFIG_DIR/zshrc" "$HOME/.zshrc"
+install_config "$CONFIG_DIR/zprofile" "$HOME/.zprofile"
+install_config "$CONFIG_DIR/starship.toml" "$HOME/.config/starship.toml"
+install_config "$CONFIG_DIR/atuin.toml" "$HOME/.config/atuin/config.toml" 0600
+install_config \
+  "$CONFIG_DIR/ghostty/config.ghostty" \
+  "$HOME/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
 
-git_custom_status() {
-  local cb=$(git_current_branch)
-  if [ -n "$cb" ]; then
-    echo "$(parse_git_dirty)$ZSH_THEME_GIT_PROMPT_PREFIX$(git_current_branch)$ZSH_THEME_GIT_PROMPT_SUFFIX"
-  fi
-}
-
-PROMPT='$(git_custom_status)%{$fg[cyan]%}[%~% ]%{$reset_color%}%B$%b '
-THEME
-
-success "eastwood theme written."
-
-# ── .zshrc ────────────────────────────────────────────────────────────────────
-info "Writing ~/.zshrc..."
-
-cat > "$HOME/.zshrc" << 'ZSHRC'
-export ZSH="$HOME/.oh-my-zsh"
-
-ZSH_THEME="eastwood"
-
-plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
-
-source $ZSH/oh-my-zsh.sh
-source ~/.zsh/themes/eastwood.zsh-theme
-source ${ZSH_CUSTOM:-$HOME/.oh-my-zsh/custom}/plugins/zsh-autosuggestions/zsh-autosuggestions.zsh
-
-# ── Homebrew ──────────────────────────────────────────────────────────────────
-export PATH="/opt/homebrew/bin:$PATH"
-
-# ── NVM ───────────────────────────────────────────────────────────────────────
-export NVM_DIR="$HOME/.nvm"
-[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && source "/opt/homebrew/opt/nvm/nvm.sh"
-[ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && source "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
-
-# ── Python ────────────────────────────────────────────────────────────────────
-alias python="/opt/homebrew/bin/python3"
-alias pip="/opt/homebrew/bin/pip3"
-
-# ── Better shell tools ────────────────────────────────────────────────────────
-alias ls="eza --icons --group-directories-first"
-alias ll="eza -la --icons --group-directories-first"
-alias cat="bat"
-
-# fzf shell integration
-[ -f "/opt/homebrew/opt/fzf/shell/completion.zsh" ] && source "/opt/homebrew/opt/fzf/shell/completion.zsh"
-[ -f "/opt/homebrew/opt/fzf/shell/key-bindings.zsh" ] && source "/opt/homebrew/opt/fzf/shell/key-bindings.zsh"
-
-# zoxide (smarter cd — use 'z' instead of 'cd')
-eval "$(zoxide init zsh)"
-
-# ── 1Password SSH Agent ───────────────────────────────────────────────────────
-# Requires 1Password to be installed with the SSH agent enabled in its settings.
-# Comment out if you are not using 1Password.
-export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/agent.sock"
-ZSHRC
-
-success "~/.zshrc written."
-
-# ── .zprofile ─────────────────────────────────────────────────────────────────
-info "Writing ~/.zprofile..."
-
-cat > "$HOME/.zprofile" << 'ZPROFILE'
-eval "$(/opt/homebrew/bin/brew shellenv)"
-ZPROFILE
-
-success "~/.zprofile written."
+success "Terminal configuration installed."
 
 # ── fzf shell integration ─────────────────────────────────────────────────────
 info "Setting up fzf shell integration..."
@@ -377,10 +345,14 @@ echo "${GREEN}${BOLD}═══════════════════�
 echo "${GREEN}${BOLD}  All done! A few manual steps remain:${RESET}"
 echo "${GREEN}${BOLD}════════════════════════════════════════${RESET}"
 echo ""
-echo "  1. Restart your terminal (or: source ~/.zshrc)"
-echo "  2. Open nvim — LazyVim plugins install automatically on first launch"
-echo "  3. Open 1Password and enable the SSH agent in its settings"
-echo "  4. Configure AWS credentials:      aws configure"
-echo "  5. Start Postgres (if needed):     brew services start postgresql@15"
-echo "  6. Start MySQL (if needed):        brew services start mysql"
+echo "  1. Quit and reopen Ghostty, then run: exec zsh -l"
+echo "  2. Sign in to Codex:                 codex login"
+echo "  3. Open nvim — LazyVim plugins install automatically on first launch"
+echo "  4. Open 1Password and enable the SSH agent in its settings"
+echo "  5. Configure AWS credentials:        aws configure"
+echo "  6. Start Postgres (if needed):       brew services start postgresql@15"
+echo "  7. Start MySQL (if needed):          brew services start mysql"
+if [ -d "$BACKUP_DIR" ]; then
+  echo "  8. Previous config backups:          $BACKUP_DIR"
+fi
 echo ""

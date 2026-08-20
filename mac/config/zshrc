@@ -1,0 +1,53 @@
+export ZSH="$HOME/.oh-my-zsh"
+
+# Starship owns the prompt; Oh My Zsh provides plugins and completions.
+ZSH_THEME=""
+SPROMPT='Correct %F{yellow}%R%f to %F{green}%r%f? [nyae] '
+
+plugins=(git zsh-autosuggestions zsh-syntax-highlighting)
+
+source "$ZSH/oh-my-zsh.sh"
+
+# Correct mistyped command names without changing arguments or paths.
+setopt CORRECT
+unsetopt CORRECT_ALL
+
+# ── Homebrew ──────────────────────────────────────────────────────────────────
+export PATH="/opt/homebrew/bin:$PATH"
+
+# ── NVM ───────────────────────────────────────────────────────────────────────
+export NVM_DIR="$HOME/.nvm"
+[ -s "/opt/homebrew/opt/nvm/nvm.sh" ] && source "/opt/homebrew/opt/nvm/nvm.sh"
+[ -s "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm" ] && source "/opt/homebrew/opt/nvm/etc/bash_completion.d/nvm"
+
+# ── Python ────────────────────────────────────────────────────────────────────
+alias python="python3"
+alias pip="pip3"
+
+# ── Better shell tools ────────────────────────────────────────────────────────
+alias ls="eza --icons --group-directories-first"
+alias ll="eza -la --icons --group-directories-first"
+alias cat="bat"
+
+# fzf shell integration
+[ -f "/opt/homebrew/opt/fzf/shell/completion.zsh" ] && source "/opt/homebrew/opt/fzf/shell/completion.zsh"
+[ -f "/opt/homebrew/opt/fzf/shell/key-bindings.zsh" ] && source "/opt/homebrew/opt/fzf/shell/key-bindings.zsh"
+
+# zoxide (smarter cd — use 'z' instead of 'cd')
+if command -v zoxide >/dev/null 2>&1; then
+  eval "$(zoxide init zsh)"
+fi
+
+# ── 1Password SSH Agent ───────────────────────────────────────────────────────
+# Requires 1Password with the SSH agent enabled. Comment out if unused.
+export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/agent.sock"
+
+# Searchable shell history (Ctrl-R and Up Arrow).
+if command -v atuin >/dev/null 2>&1; then
+  eval "$(atuin init zsh)"
+fi
+
+# Minimal Catppuccin prompt with Git and project runtime indicators.
+if command -v starship >/dev/null 2>&1; then
+  eval "$(starship init zsh)"
+fi
