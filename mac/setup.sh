@@ -8,7 +8,7 @@
 #  What this installs:
 #    - Homebrew + formulae (git, neovim, go, node/nvm, rust, lazygit,
 #      ripgrep, fd, fzf, jq, gh, bat, eza, zoxide, Atuin, Starship, ...)
-#    - Homebrew casks (Ghostty, Codex, Warp, Rectangle, 1Password, ...)
+#    - Homebrew casks (Ghostty, Codex, Rectangle, 1Password, ...)
 #    - Oh My Zsh + zsh-autosuggestions + zsh-syntax-highlighting
 #    - Minimal Catppuccin Ghostty and Starship configuration
 #    - LazyVim (Neovim distribution)
@@ -151,7 +151,6 @@ CASKS=(
   ghostty
   raycast
   rectangle
-  warp
 )
 
 for cask in "${CASKS[@]}"; do

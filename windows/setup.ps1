@@ -137,7 +137,7 @@ if (-not (Test-Command winget)) {
     throw 'WinGet is required. Install or update App Installer from the Microsoft Store, then run this script again.'
 }
 
-# Core terminal tools. Warp is intentionally not modified or removed.
+# Core terminal tools.
 Install-WinGetPackage -Id 'Microsoft.WindowsTerminal' -DisplayName 'Windows Terminal' -Command 'wt.exe'
 Install-WinGetPackage -Id 'Microsoft.PowerShell' -DisplayName 'PowerShell 7' -Command 'pwsh.exe'
 Install-WinGetPackage -Id 'Git.Git' -DisplayName 'Git' -Command 'git.exe'
@@ -209,9 +209,6 @@ Write-Host '  2. Open the "Developer PowerShell" profile from the new-tab menu.'
 Write-Host '  3. Optionally make it the default under Settings > Startup.'
 Write-Host '  4. Run "codex login" to connect your ChatGPT account.'
 Write-Host '  5. Run "atuin login" if you want history sync.'
-Write-Host ''
-Write-Host 'Warp was not changed.'
-
 if (Test-Path -LiteralPath $BackupDirectory) {
     Write-Host "Backups: $BackupDirectory"
 }
