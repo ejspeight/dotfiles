@@ -1,0 +1,16 @@
+dialect = "uk"
+timezone = "local"
+
+search_mode = "fuzzy"
+search_mode_shell_up_key_binding = "prefix"
+filter_mode = "global"
+filter_mode_shell_up_key_binding = "directory"
+workspaces = true
+
+style = "compact"
+inline_height = 30
+show_preview = true
+
+secrets_filter = true
+enter_accept = false
+store_failed = true

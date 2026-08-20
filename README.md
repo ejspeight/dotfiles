@@ -72,3 +72,54 @@ chmod +x setup.sh && ./setup.sh
 1. Restart your terminal (or `exec zsh`)
 2. Open `nvim` — LazyVim plugins install automatically
 3. Run `nvm install 23` if Node wasn't set up during the script
+
+## Windows
+
+Sets up a native Windows developer terminal with the same minimal Catppuccin
+prompt as the Mac. Ghostty does not currently support Windows, so this setup
+uses Windows Terminal with PowerShell 7 instead. It does not modify or remove
+Warp.
+
+Open PowerShell in the cloned repository, then run:
+
+```powershell
+cd windows
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
+```
+
+Use `-SkipCodex` if you do not want the script to install Codex CLI.
+
+### What gets installed
+
+- **Terminal** — Windows Terminal with a dedicated transparent Catppuccin Mocha developer profile
+- **Shell** — PowerShell 7 with PSReadLine history suggestions and Atuin search
+- **Prompt** — the same minimal Starship layout with project, Git status, Node version and command duration
+- **Font** — JetBrains Mono Nerd Font for prompt symbols
+- **Core tools** — Git and Node.js LTS through WinGet
+- **AI** — Codex CLI through npm after Node and npm are verified
+
+### Terminal configuration
+
+The editable source files live under [`windows/config`](windows/config):
+
+| File | Installed to | Purpose |
+|---|---|---|
+| `Microsoft.PowerShell_profile.ps1` | `~/Documents/PowerShell/Microsoft.PowerShell_profile.ps1` | PSReadLine, Atuin and Starship startup |
+| `starship.toml` | `~/.config/starship.toml` | Minimal prompt layout and Catppuccin colours |
+| `atuin.toml` | `~/.config/atuin/config.toml` | History search and key behaviour |
+| `windows-terminal.fragment.json` | `%LOCALAPPDATA%/Microsoft/Windows Terminal/Fragments/eddie-dotfiles/developer.json` | Adds the Developer PowerShell profile and Catppuccin colour scheme |
+| `codex/config.toml` | `~/.codex/config.toml` | Portable Codex defaults; never credentials |
+
+Existing config files are copied to
+`~/.config-backups/dotfiles-<timestamp>/` before replacement. The Windows
+Terminal fragment adds a new profile without rewriting the user's main
+`settings.json`. Existing Codex config is preserved, and Codex credentials are
+never copied.
+
+### After running
+
+1. Close and reopen Windows Terminal
+2. Select **Developer PowerShell** from the new-tab menu
+3. Optionally make it the default under **Settings > Startup**
+4. Run `codex login` to connect ChatGPT
+5. Run `atuin login` if you want history sync
