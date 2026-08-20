@@ -7,11 +7,11 @@
 .DESCRIPTION
   Installs Windows Terminal, PowerShell 7, Git, Starship, Atuin, a JetBrains
   Mono Nerd Font and Node.js LTS with WinGet. It then installs the tracked
-  PowerShell, Starship, Atuin, Windows Terminal and Codex configuration.
+  PowerShell, Starship, Atuin and Windows Terminal configuration.
 
   Existing configuration is copied to
-  ~/.config-backups/dotfiles-<timestamp>/ before it is replaced. Existing
-  Codex configuration and credentials are deliberately preserved.
+  ~/.config-backups/dotfiles-<timestamp>/ before it is replaced. Codex
+  configuration and credentials are never read, copied or changed.
 
 .EXAMPLE
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
@@ -182,16 +182,6 @@ Install-Config `
 Install-Config `
     -Source (Join-Path $ConfigDirectory 'windows-terminal.fragment.json') `
     -Target $terminalFragment
-
-$codexConfigTarget = Join-Path $HOME '.codex\config.toml'
-if (Test-Path -LiteralPath $codexConfigTarget) {
-    Write-WarningMessage 'Existing Codex config preserved.'
-    Write-WarningMessage "Portable defaults are available at $(Join-Path $ConfigDirectory 'codex\config.toml')"
-} else {
-    Install-Config `
-        -Source (Join-Path $ConfigDirectory 'codex\config.toml') `
-        -Target $codexConfigTarget
-}
 
 if (-not $SkipCodex) {
     if (Test-Command codex) {

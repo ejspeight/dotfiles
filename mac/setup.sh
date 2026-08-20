@@ -215,13 +215,6 @@ install_config \
   "$CONFIG_DIR/ghostty/config.ghostty" \
   "$HOME/Library/Application Support/com.mitchellh.ghostty/config.ghostty"
 
-if [ -e "$HOME/.codex/config.toml" ]; then
-  warn "Existing Codex config preserved."
-  warn "Portable defaults are available at $CONFIG_DIR/codex/config.toml"
-else
-  install_config "$CONFIG_DIR/codex/config.toml" "$HOME/.codex/config.toml" 0600
-fi
-
 success "Terminal configuration installed."
 
 # ── fzf shell integration ─────────────────────────────────────────────────────

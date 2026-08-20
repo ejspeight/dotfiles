@@ -20,7 +20,7 @@ chmod +x setup.sh && ./setup.sh
 - **Shell** — Oh My Zsh, zsh-autosuggestions, zsh-syntax-highlighting, Atuin history and command-only typo correction
 - **Languages** — Node (via nvm), Go, Rust (via rustup), Python, .NET SDK
 - **Shell tools** — fzf, ripgrep, fd, bat, eza, zoxide, jq, lazygit, gh
-- **AI** — Codex CLI with portable model, reasoning and personality defaults
+- **AI** — Codex CLI application; its configuration and credentials remain local
 - **Apps** — Ghostty, Codex, Warp, Raycast, Rectangle, DBeaver, 1Password
 
 ### Terminal configuration
@@ -34,9 +34,10 @@ The editable source files live under [`mac/config`](mac/config):
 | `starship.toml` | `~/.config/starship.toml` | Minimal prompt layout and Catppuccin colours |
 | `atuin.toml` | `~/.config/atuin/config.toml` | History search and key behaviour |
 | `ghostty/config.ghostty` | `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` | Font, theme, transparency and window behaviour |
-| `codex/config.toml` | `~/.codex/config.toml` | Portable Codex defaults; never credentials |
 
-Existing config files are copied to `~/.config-backups/dotfiles-<timestamp>/` before replacement. An existing Codex config is preserved because the desktop app may add machine-specific plugin settings; use the tracked file as a reviewable template in that case. Codex credentials (`~/.codex/auth.json`) are deliberately excluded.
+Existing config files are copied to `~/.config-backups/dotfiles-<timestamp>/`
+before replacement. The setup does not read, copy or modify Codex configuration
+or credentials, and this repository does not track them.
 
 ### After running
 
@@ -108,13 +109,12 @@ The editable source files live under [`windows/config`](windows/config):
 | `starship.toml` | `~/.config/starship.toml` | Minimal prompt layout and Catppuccin colours |
 | `atuin.toml` | `~/.config/atuin/config.toml` | History search and key behaviour |
 | `windows-terminal.fragment.json` | `%LOCALAPPDATA%/Microsoft/Windows Terminal/Fragments/eddie-dotfiles/developer.json` | Adds the Developer PowerShell profile and Catppuccin colour scheme |
-| `codex/config.toml` | `~/.codex/config.toml` | Portable Codex defaults; never credentials |
 
 Existing config files are copied to
 `~/.config-backups/dotfiles-<timestamp>/` before replacement. The Windows
 Terminal fragment adds a new profile without rewriting the user's main
-`settings.json`. Existing Codex config is preserved, and Codex credentials are
-never copied.
+`settings.json`. The setup does not read, copy or modify Codex configuration or
+credentials, and this repository does not track them.
 
 ### After running
 
