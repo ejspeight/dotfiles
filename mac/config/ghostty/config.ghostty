@@ -1,0 +1,28 @@
+# Catppuccin developer setup
+theme = Catppuccin Mocha
+font-family = JetBrainsMono Nerd Font Mono
+font-size = 14
+font-thicken = true
+font-thicken-strength = 160
+
+# Transparent, softly blurred background that remains readable.
+background-opacity = 0.90
+background-opacity-cells = true
+background-blur = 20
+minimum-contrast = 1.1
+
+# Calm window chrome and comfortable breathing room around the terminal grid.
+window-padding-x = 12
+window-padding-y = 10
+window-padding-balance = true
+window-padding-color = background
+macos-titlebar-style = transparent
+macos-option-as-alt = left
+
+# Developer-friendly interaction defaults.
+shell-integration = detect
+cursor-style = block
+cursor-style-blink = false
+mouse-hide-while-typing = true
+copy-on-select = true
+confirm-close-surface = true

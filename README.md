@@ -4,7 +4,7 @@ Personal machine setup scripts for getting a new machine up and running.
 
 ## Mac
 
-Sets up a full dev environment including Homebrew, Neovim (LazyVim), Oh My Zsh, Node, .NET, Rust, Go, and more.
+Sets up a full dev environment including Ghostty, Codex, a minimal Catppuccin Starship prompt, searchable shell history, Neovim (LazyVim), Node, .NET, Rust, Go, and more.
 
 ```bash
 cd mac
@@ -15,17 +15,36 @@ chmod +x setup.sh && ./setup.sh
 
 - **Homebrew** — package manager + all formulae
 - **Neovim** — with [LazyVim](https://www.lazyvim.org) (plugins auto-install on first launch)
-- **Oh My Zsh** — with zsh-autosuggestions, zsh-syntax-highlighting, eastwood theme
+- **Terminal** — Ghostty with Catppuccin Mocha, JetBrains Mono Nerd Font, transparency and blur
+- **Prompt** — minimal Starship layout with project, Git status, Node version and command duration
+- **Shell** — Oh My Zsh, zsh-autosuggestions, zsh-syntax-highlighting, Atuin history and command-only typo correction
 - **Languages** — Node (via nvm), Go, Rust (via rustup), Python, .NET SDK
 - **Shell tools** — fzf, ripgrep, fd, bat, eza, zoxide, jq, lazygit, gh
-- **Apps** — Warp, Raycast, Rectangle, DBeaver, 1Password
+- **AI** — Codex CLI with portable model, reasoning and personality defaults
+- **Apps** — Ghostty, Codex, Warp, Raycast, Rectangle, DBeaver, 1Password
+
+### Terminal configuration
+
+The editable source files live under [`mac/config`](mac/config):
+
+| File | Installed to | Purpose |
+|---|---|---|
+| `zshrc` | `~/.zshrc` | Shell plugins, aliases, Atuin and Starship startup |
+| `zprofile` | `~/.zprofile` | Homebrew environment for login shells |
+| `starship.toml` | `~/.config/starship.toml` | Minimal prompt layout and Catppuccin colours |
+| `atuin.toml` | `~/.config/atuin/config.toml` | History search and key behaviour |
+| `ghostty/config.ghostty` | `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` | Font, theme, transparency and window behaviour |
+| `codex/config.toml` | `~/.codex/config.toml` | Portable Codex defaults; never credentials |
+
+Existing config files are copied to `~/.config-backups/dotfiles-<timestamp>/` before replacement. An existing Codex config is preserved because the desktop app may add machine-specific plugin settings; use the tracked file as a reviewable template in that case. Codex credentials (`~/.codex/auth.json`) are deliberately excluded.
 
 ### After running
 
-1. Restart your terminal
-2. Open `nvim` — LazyVim plugins install automatically
-3. Enable the SSH agent in 1Password settings
-4. Run `aws configure` to set up AWS credentials
+1. Quit and reopen Ghostty, then run `exec zsh -l`
+2. Run `codex login` and sign in with ChatGPT
+3. Open `nvim` — LazyVim plugins install automatically
+4. Enable the SSH agent in 1Password settings
+5. Run `aws configure` to set up AWS credentials
 
 ## Linux
 
