@@ -307,23 +307,53 @@ function Get-InstalledFontNames {
     return $names
 }
 
+function ConvertTo-FontFamilyName {
+    # The registry lists one entry per weight, for example
+    # "JetBrainsMono Nerd Font Mono Bold (TrueType)". Windows Terminal wants
+    # the family, so drop the format and weight suffixes.
+    param([string]$RegistryName)
+
+    $name = $RegistryName -replace '\s*\((TrueType|OpenType)\)\s*$', ''
+    $name = $name -replace '\s+(Thin|ExtraLight|Light|Regular|Medium|SemiBold|Bold|ExtraBold|Black)(\s+Italic)?$', ''
+    $name = $name -replace '\s+Italic$', ''
+    return $name.Trim()
+}
+
 function Resolve-TerminalFont {
-    # Preference order: the mac font, then the Nerd Font variants that ship
-    # with Windows Terminal itself, which need no download at all.
+    # Preferred faces first, then any other Nerd Font already on the machine.
+    # Returns $null when no Nerd Font is installed.
     $preferences = @(
         @{ Face = 'JetBrainsMono Nerd Font'; Match = 'JetBrainsMono*Nerd Font*' },
         @{ Face = 'CaskaydiaCove Nerd Font'; Match = 'CaskaydiaCove*Nerd Font*' },
         @{ Face = 'Cascadia Mono NF';        Match = 'Cascadia Mono NF*' },
-        @{ Face = 'Cascadia Code NF';        Match = 'Cascadia Code NF*' }
+        @{ Face = 'Cascadia Code NF';        Match = 'Cascadia Code NF*' },
+        @{ Face = $null;                     Match = '*Nerd Font*' }
     )
 
     $installed = Get-InstalledFontNames
     foreach ($preference in $preferences) {
         foreach ($name in $installed) {
-            if ($name -like $preference.Match) { return $preference.Face }
+            if ($name -like $preference.Match) {
+                if ($preference.Face) { return $preference.Face }
+                return (ConvertTo-FontFamilyName $name)
+            }
         }
     }
     return $null
+}
+
+function Resolve-FallbackFont {
+    # No Nerd Font is available, so pick a monospace face that is definitely
+    # registered. Naming a font that is not installed makes Windows Terminal
+    # warn on every launch, which is worse than missing glyphs.
+    $installed = Get-InstalledFontNames
+    foreach ($candidate in @('Cascadia Mono', 'Cascadia Code', 'Consolas')) {
+        foreach ($name in $installed) {
+            if ($name -like "$candidate*") { return $candidate }
+        }
+    }
+    # Present on every Windows install since Vista.
+    return 'Consolas'
 }
 
 if (-not $SkipInstalls) {
@@ -718,11 +748,12 @@ if (-not $SkipConfig) {
 
     $fontFace = Resolve-TerminalFont
     if (-not $fontFace) {
-        # Ships with Windows Terminal 1.19+, so this needs no download.
-        $fontFace = 'Cascadia Mono NF'
-        Write-Warn "No Nerd Font detected. Using '$fontFace', bundled with Windows Terminal."
-        Write-Detail 'For JetBrains Mono, download JetBrainsMono.zip from the Nerd Fonts releases'
-        Write-Detail 'page, then right-click the .ttf files and choose "Install for all users".'
+        $fontFace = Resolve-FallbackFont
+        Write-Warn "No Nerd Font is installed. Falling back to '$fontFace'."
+        Write-Detail 'Prompt icons will render as boxes until a Nerd Font is installed.'
+        Write-Detail 'Retry:  winget install --id DEVCOM.JetBrainsMonoNerdFont --source winget'
+        Write-Detail 'Or download JetBrainsMono.zip from the Nerd Fonts releases page, extract it,'
+        Write-Detail 'select the .ttf files and choose "Install for all users", then re-run this script.'
     } else {
         Write-Ok "Terminal font: $fontFace"
     }
