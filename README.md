@@ -74,7 +74,87 @@ chmod +x setup.sh && ./setup.sh
 2. Open `nvim`; LazyVim plugins install automatically
 3. Run `nvm install 23` if Node wasn't set up during the script
 
-## Windows
+## Windows (work / managed machine)
+
+For a corporate machine where the toolchain is already installed and the real
+friction is TLS inspection. It touches the terminal only, never languages,
+runtimes or SDKs.
+
+`work-setup.ps1` is self-contained: it embeds its own PowerShell profile,
+Starship config and Windows Terminal fragment, so it can be copied to the
+client machine on its own without cloning this repository.
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1
+```
+
+### What it does
+
+- **Installs terminal components only:** Windows Terminal, PowerShell 7,
+  Starship and a Nerd Font, all via WinGet's `winget` source (the Microsoft
+  Store source is commonly blocked by policy). Missing WinGet is a warning,
+  not a failure; the rest still runs.
+- **Fixes TLS inspection:** detects the corporate root CA both by subject
+  (Zscaler, Netskope, Palo Alto and other appliances) and by TLS-probing the
+  hosts the toolchain actually uses, then exports PEM bundles and points every
+  tool that ships its own CA store at them.
+- **Writes config:** a minimal PowerShell profile, the same Catppuccin
+  Starship prompt as macOS, and a Windows Terminal profile fragment.
+
+### Why the certificate step is needed
+
+Zscaler terminates TLS with its own root CA. Tools that read the Windows trust
+store (WinGet, .NET, Docker Desktop) inherit that trust automatically. Tools
+that carry their own CA bundle do not, which is why npm, Azure CLI and
+Neovim's Mason fail on an otherwise working machine.
+
+| Variable | Bundle | Fixes |
+|---|---|---|
+| `NODE_EXTRA_CA_CERTS` | corporate roots only (additive) | node, npm, pnpm, yarn, vite |
+| `REQUESTS_CA_BUNDLE` | full Windows store (replacing) | Azure CLI, Python requests |
+| `CURL_CA_BUNDLE` | full Windows store | curl, Mason in Neovim |
+| `SSL_CERT_FILE` | full Windows store | OpenSSL-based tools |
+| `PIP_CERT` | full Windows store | pip |
+
+Git is handled differently: `http.sslBackend=schannel` makes it read the
+Windows store directly, so it needs no bundle at all.
+
+TLS verification is never disabled. `NODE_EXTRA_CA_CERTS` gets the corporate
+roots alone because it *adds* to Node's built-in trust; the others get the
+full Windows store because they *replace* a tool's bundle, and a partial file
+would break every non-inspected connection.
+
+Bundles are written to `~/.config/certs/`. Re-run the script after a CA
+rotation, or roll the variables back with:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1 -RemoveCertEnv
+```
+
+### Useful switches
+
+| Switch | Effect |
+|---|---|
+| `-SkipInstalls` | Certificates and config only, for a locked-down machine |
+| `-SkipCerts` | Terminal setup without touching trust settings |
+| `-ExtraCaSubject` | Extra root CA subject patterns for an in-house proxy |
+| `-RemoveCertEnv` | Remove the certificate variables and exit |
+
+### Notes
+
+- Docker **builds** are not covered. A container has its own trust store, so
+  an image that fetches over TLS needs the CA copied in
+  (`COPY corporate-roots.pem /usr/local/share/ca-certificates/` then
+  `update-ca-certificates`). Docker Desktop itself uses the Windows store.
+- If no Nerd Font can be installed, the script falls back to `Cascadia Mono
+  NF`, which ships with Windows Terminal and needs no download.
+- If Documents is redirected to OneDrive, the profile is still written where
+  `pwsh` reads it from, and the script says so.
+- The prompt shows the Azure subscription only if you set `disabled = false`
+  under `[azure]` in `~/.config/starship.toml`. It is off by default so the
+  subscription name stays out of screen shares.
+
+## Windows (personal / new device)
 
 Sets up a native Windows developer terminal with the same minimal Catppuccin
 prompt as the Mac. Ghostty does not currently support Windows, so this setup
