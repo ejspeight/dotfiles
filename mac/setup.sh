@@ -15,6 +15,7 @@
 #    - Node via NVM (v23)
 #    - Rust via rustup (stable)
 #    - Global npm packages: pnpm, yarn
+#    - Local LLM: Ollama + llm CLI with a model sized to this Mac's RAM
 # =============================================================================
 
 set -e
@@ -124,6 +125,10 @@ FORMULAE=(
   docker-completion
   docker-compose
 
+  # Local AI
+  ollama
+  llm
+
   # Shell
   atuin
   starship
@@ -220,6 +225,51 @@ success "Terminal configuration installed."
 info "Setting up fzf shell integration..."
 "$(brew --prefix)/opt/fzf/install" --no-bash --no-fish --no-update-rc --completion --key-bindings 2>/dev/null || true
 success "fzf shell integration done."
+
+# ── Local LLM ─────────────────────────────────────────────────────────────────
+info "Setting up local LLM (Ollama + llm)..."
+
+readonly LLM_MODEL="terminal-llm"
+
+# Pick a model that fits this Mac's unified memory. macOS lets the GPU use
+# roughly two-thirds of RAM, so the model plus its context must fit in that.
+# Override with: LOCAL_LLM_MODEL=<ollama tag> ./setup.sh
+RAM_GB=$(( $(sysctl -n hw.memsize) / 1073741824 ))
+if [ -n "$LOCAL_LLM_MODEL" ]; then
+  LLM_BASE_MODEL="$LOCAL_LLM_MODEL"
+elif [ "$RAM_GB" -ge 32 ]; then
+  LLM_BASE_MODEL="gemma4:26b"   # ~16GB
+elif [ "$RAM_GB" -ge 16 ]; then
+  LLM_BASE_MODEL="gemma4:12b"   # ~8GB
+else
+  LLM_BASE_MODEL="gemma4:e4b"   # small model for 8GB Macs
+fi
+info "Detected ${RAM_GB}GB RAM, using $LLM_BASE_MODEL."
+
+brew services start ollama >/dev/null 2>&1 || warn "Could not start the Ollama service."
+llm install llm-ollama llm-cmd
+llm logs off
+
+# Wait for the Ollama service to accept requests.
+for _ in {1..15}; do
+  ollama list &>/dev/null && break
+  sleep 1
+done
+
+# Download the model, add a 16K context window, make it the llm default and
+# turn thinking off for quick terminal answers.
+LLM_MODELFILE="$(mktemp)"
+sed "s|__BASE_MODEL__|$LLM_BASE_MODEL|" "$CONFIG_DIR/ollama/Modelfile" > "$LLM_MODELFILE"
+
+if ollama pull "$LLM_BASE_MODEL" \
+  && ollama create "$LLM_MODEL" -f "$LLM_MODELFILE" \
+  && llm models default "$LLM_MODEL" \
+  && llm models options set "$LLM_MODEL" think false; then
+  success "Local LLM ready: $LLM_MODEL ($LLM_BASE_MODEL, 16K context, thinking off)."
+else
+  warn "Local model setup did not finish. See the Local LLM section of the README."
+fi
+rm -f "$LLM_MODELFILE"
 
 # ── NVM + Node ────────────────────────────────────────────────────────────────
 info "Setting up NVM and Node v23..."
@@ -351,7 +401,8 @@ echo "  4. Open 1Password and enable the SSH agent in its settings"
 echo "  5. Configure AWS credentials:        aws configure"
 echo "  6. Start Postgres (if needed):       brew services start postgresql@15"
 echo "  7. Start MySQL (if needed):          brew services start mysql"
+echo "  8. Test the local LLM:               llm \"Say hi in five words\""
 if [ -d "$BACKUP_DIR" ]; then
-  echo "  8. Previous config backups:          $BACKUP_DIR"
+  echo "  9. Previous config backups:          $BACKUP_DIR"
 fi
 echo ""

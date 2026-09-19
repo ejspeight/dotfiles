@@ -42,6 +42,18 @@ fi
 # Requires 1Password with the SSH agent enabled. Comment out if unused.
 export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/agent.sock"
 
+# ── Local LLM (Ollama + llm) ──────────────────────────────────────────────────
+# Commands starting with a space are not saved to history (for private prompts).
+setopt HIST_IGNORE_SPACE
+
+# wtf: rerun the last command and ask the local model why it failed.
+# Reruns the command, so avoid after anything destructive.
+wtf() {
+  local cmd=$(fc -ln -1)
+  eval "$cmd" 2>&1 | tail -100 | llm "I ran: $cmd
+Explain what went wrong and how to fix it."
+}
+
 # Searchable shell history (Ctrl-R and Up Arrow).
 if command -v atuin >/dev/null 2>&1; then
   eval "$(atuin init zsh)"

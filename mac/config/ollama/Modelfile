@@ -1,0 +1,5 @@
+# Local terminal model: the base model plus a 16K context window.
+# setup.sh replaces __BASE_MODEL__ with the model chosen for this Mac, then
+# builds it with: ollama create terminal-llm -f <generated file>
+FROM __BASE_MODEL__
+PARAMETER num_ctx 16384

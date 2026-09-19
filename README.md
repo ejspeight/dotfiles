@@ -21,6 +21,7 @@ chmod +x setup.sh && ./setup.sh
 - **Languages:** Node (via nvm), Go, Rust (via rustup), Python, .NET SDK
 - **Shell tools:** fzf, ripgrep, fd, bat, eza, zoxide, jq, lazygit, gh
 - **AI:** Codex CLI application; its configuration and credentials remain local
+- **Local LLM:** Ollama and the `llm` CLI, with a model chosen to fit the Mac's memory (see [Local LLM](#local-llm))
 - **Apps:** Ghostty, Codex, Raycast, Rectangle, DBeaver, 1Password
 
 ### Terminal configuration
@@ -29,10 +30,11 @@ The editable source files live under [`mac/config`](mac/config):
 
 | File | Installed to | Purpose |
 |---|---|---|
-| `zshrc` | `~/.zshrc` | Shell plugins, aliases, Atuin and Starship startup |
+| `zshrc` | `~/.zshrc` | Shell plugins, aliases, Atuin and Starship startup, `wtf` local LLM helper |
 | `zprofile` | `~/.zprofile` | Homebrew environment for login shells |
 | `starship.toml` | `~/.config/starship.toml` | Minimal prompt layout and Catppuccin colours |
 | `atuin.toml` | `~/.config/atuin/config.toml` | History search and key behaviour |
+| `ollama/Modelfile` | Built into the `terminal-llm` Ollama model | Chosen base model with a 16K context window |
 | `ghostty/config.ghostty` | `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` | Font, theme, transparency and window behaviour |
 
 Existing config files are copied to `~/.config-backups/dotfiles-<timestamp>/`
@@ -46,6 +48,51 @@ or credentials, and this repository does not track them.
 3. Open `nvim`; LazyVim plugins install automatically
 4. Enable the SSH agent in 1Password settings
 5. Run `aws configure` to set up AWS credentials
+6. Test the local LLM: `llm "Say hi in five words"`
+
+### Local LLM
+
+A private terminal assistant that runs entirely on the Mac. Prompts are never
+sent to a cloud service.
+
+`setup.sh` installs [Ollama](https://ollama.com) and the
+[`llm`](https://llm.datasette.io) CLI, then picks a model based on the Mac's
+memory:
+
+| RAM | Model | Download |
+|---|---|---|
+| 8GB | `gemma4:e4b` | ~3GB |
+| 16GB to 24GB | `gemma4:12b` | ~8GB |
+| 32GB or more | `gemma4:26b` | ~16GB |
+
+The chosen model is saved as `terminal-llm` with a 16K context window, set as
+the `llm` default, and has thinking turned off for faster answers. To use a
+different model, pass any [Ollama tag](https://ollama.com/library):
+
+```bash
+LOCAL_LLM_MODEL=qwen3.6:35b-a3b ./setup.sh
+```
+
+**Usage**
+
+```bash
+llm "explain what a git rebase does"             # quick question
+llm chat                                         # back-and-forth chat
+llm cmd find all files over 1GB here             # suggest a command, review, then run
+git diff | llm "write a commit message"          # pipe output in
+wtf                                              # rerun the last command and explain the failure
+llm -o think true "why does this leak memory?"   # let the model think first
+```
+
+- Start a command with a space to keep it out of shell history.
+- `wtf` reruns the last command, so do not use it after anything destructive.
+- Conversation logging is turned off (`llm logs off`).
+
+**Checking performance**
+
+Run `ollama ps` while the model is loaded. `100% GPU` is what you want. A
+CPU/GPU split means the model does not fit in memory, so close memory-heavy
+apps or rerun the setup with a smaller `LOCAL_LLM_MODEL`.
 
 ## Linux
 
