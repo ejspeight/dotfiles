@@ -1,0 +1,10 @@
+# PowerShell scripts are byte-for-byte.
+#
+# work-setup.ps1 is saved with a UTF-8 BOM on purpose: Windows PowerShell 5.1
+# reads a BOM-less script as the ANSI codepage, which silently corrupts every
+# non-ASCII character the script writes out. Line-ending or encoding rewriting
+# by Git would undo that, so these files are marked binary-safe.
+*.ps1 -text
+
+# Shell scripts must keep LF, whatever the platform they are checked out on.
+*.sh text eol=lf

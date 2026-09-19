@@ -1,4 +1,4 @@
-#Requires -Version 5.1
+﻿#Requires -Version 5.1
 
 <#
 .SYNOPSIS
@@ -9,14 +9,24 @@
   Written for a managed client machine where the toolchain (Node, Docker,
   Neovim, .NET) is already installed and the main friction is TLS inspection.
 
-  It does three things, each independently skippable:
+  It does four things, each independently skippable:
 
     1. Installs only terminal components: Windows Terminal, PowerShell 7,
-       Starship and a Nerd Font. Never languages, runtimes or SDKs.
+       Starship, Atuin and a Nerd Font. Never languages, runtimes or SDKs.
     2. Detects the corporate TLS-inspection root CA, exports PEM bundles and
        points the tools that carry their own CA store at them.
-    3. Writes a PowerShell profile, a Starship prompt and a Windows Terminal
-       fragment.
+    3. Writes a PowerShell profile, a Starship prompt, an Atuin config and a
+       Windows Terminal fragment.
+    4. Sets up a private local LLM: Ollama, the llm CLI and a model built for
+       terminal use. Nothing leaves the machine and no account is needed.
+
+  Every install is per-user and needs no administrator rights. Where WinGet
+  cannot provide a package, the script falls back to the vendor's own release
+  archive unpacked into ~/.local/bin.
+
+  The file is deliberately pure ASCII and saved with a UTF-8 BOM. Windows
+  PowerShell 5.1 reads a BOM-less script as the ANSI codepage, which would
+  corrupt every prompt glyph it writes out.
 
   TLS verification is never disabled. The script only teaches tools to trust
   the same roots Windows already trusts, which is the supported way to work
@@ -33,7 +43,15 @@
   Skip certificate detection and environment variables.
 
 .PARAMETER SkipConfig
-  Skip the PowerShell profile, Starship config and Windows Terminal fragment.
+  Skip the PowerShell profile, Starship config, Atuin config and Windows
+  Terminal fragment.
+
+.PARAMETER SkipLlm
+  Skip the local LLM setup (Ollama, llm CLI and model download).
+
+.PARAMETER LlmModel
+  Ollama model tag to build terminal-llm from, instead of the default.
+  Example: -LlmModel 'gemma4:12b'
 
 .PARAMETER ExtraCaSubject
   Additional root CA subject patterns to treat as corporate, for proxies not
@@ -63,6 +81,8 @@ param(
     [switch]$SkipInstalls,
     [switch]$SkipCerts,
     [switch]$SkipConfig,
+    [switch]$SkipLlm,
+    [string]$LlmModel = '',
     [string[]]$ExtraCaSubject = @(),
     [string[]]$ProbeHost = @(
         'registry.npmjs.org',
@@ -87,7 +107,7 @@ if (Test-Path Variable:\PSNativeCommandUseErrorActionPreference) {
     $PSNativeCommandUseErrorActionPreference = $false
 }
 
-# ── Paths ─────────────────────────────────────────────────────────────────────
+# -- Paths ---------------------------------------------------------------------
 
 $BackupStamp     = Get-Date -Format 'yyyyMMdd-HHmmss'
 $BackupDirectory = Join-Path $HOME ".config-backups\dotfiles-$BackupStamp"
@@ -102,6 +122,18 @@ $CertEnvNames = @(
     'SSL_CERT_FILE',
     'CURL_CA_BUNDLE',
     'PIP_CERT'
+)
+
+# Per-user fallbacks for packages WinGet cannot provide. Both are plain HTTPS
+# to github.com, verified against the Windows trust store like any other
+# download; nothing here weakens certificate checking.
+$AtuinReleaseUrl = 'https://github.com/atuinsh/atuin/releases/latest/download/atuin-x86_64-pc-windows-msvc.zip'
+
+# Pinned first so a new upstream release cannot change what gets installed,
+# with the moving URL as a fallback if the tag is ever withdrawn.
+$NerdFontUrls = @(
+    'https://github.com/ryanoasis/nerd-fonts/releases/download/v3.5.1/JetBrainsMono.zip',
+    'https://github.com/ryanoasis/nerd-fonts/releases/latest/download/JetBrainsMono.zip'
 )
 
 # Root CA subjects belonging to common enterprise TLS-inspection appliances.
@@ -123,7 +155,7 @@ $InspectionPatterns = @(
     'iboss'
 ) + $ExtraCaSubject
 
-# ── Output helpers ────────────────────────────────────────────────────────────
+# -- Output helpers ------------------------------------------------------------
 
 function Write-Section {
     param([string]$Message)
@@ -178,6 +210,66 @@ function Update-SessionPath {
     $env:Path = $entries -join ';'
 }
 
+function Add-UserPathEntry {
+    # Adds a directory to the persistent user PATH as well as this session.
+    # Tools installed into ~/.local/bin are useless until the next shell
+    # otherwise.
+    param([Parameter(Mandatory)][string]$Directory)
+
+    $userPath = [Environment]::GetEnvironmentVariable('Path', 'User')
+    $entries  = @($userPath -split ';' | Where-Object { $_ })
+    if ($entries -notcontains $Directory) {
+        [Environment]::SetEnvironmentVariable('Path', (@($entries + $Directory) -join ';'), 'User')
+        Write-Detail "added $Directory to the user PATH"
+    }
+    if (($env:Path -split ';') -notcontains $Directory) {
+        $env:Path = "$Directory;$env:Path"
+    }
+}
+
+function Install-FromGitHubZip {
+    <#
+      Per-user fallback for a package WinGet cannot supply: download a release
+      archive and drop one executable into ~/.local/bin. No administrator
+      rights and no Microsoft Store involved.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$ExeName,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
+
+    $binDirectory = Join-Path $HOME '.local\bin'
+    $temp = Join-Path ([IO.Path]::GetTempPath()) ('dotfiles-' + [Guid]::NewGuid().ToString('N'))
+
+    try {
+        New-Item -ItemType Directory -Path $binDirectory -Force | Out-Null
+        New-Item -ItemType Directory -Path $temp -Force | Out-Null
+
+        $archive = Join-Path $temp 'download.zip'
+        Write-Detail "downloading $Url"
+        Invoke-WebRequest -Uri $Url -OutFile $archive -UseBasicParsing
+        Expand-Archive -LiteralPath $archive -DestinationPath $temp -Force
+
+        $exe = Get-ChildItem -LiteralPath $temp -Recurse -Filter $ExeName -File |
+            Select-Object -First 1
+        if (-not $exe) {
+            Write-Warn "The $DisplayName archive did not contain $ExeName."
+            return $false
+        }
+
+        Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $binDirectory $ExeName) -Force
+        Add-UserPathEntry -Directory $binDirectory
+        Write-Ok "$DisplayName installed to $binDirectory."
+        return $true
+    } catch {
+        Write-Warn "Could not install $DisplayName from its release archive: $($_.Exception.Message)"
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Write-TextFile {
     # Writes UTF-8 without a BOM. Windows Terminal and Starship both parse
     # their files more reliably without one.
@@ -210,7 +302,7 @@ function Install-Config {
     Write-Ok "wrote $Path"
 }
 
-# ── Undo path ─────────────────────────────────────────────────────────────────
+# -- Undo path -----------------------------------------------------------------
 
 if ($RemoveCertEnv) {
     Write-Section 'Removing certificate environment variables'
@@ -232,7 +324,7 @@ if ($RemoveCertEnv) {
     return
 }
 
-# ── Preflight ─────────────────────────────────────────────────────────────────
+# -- Preflight -----------------------------------------------------------------
 
 Write-Host ''
 Write-Host 'Windows Work Terminal Setup' -ForegroundColor White
@@ -246,7 +338,7 @@ $IsAdmin = Test-Administrator
 $Scope   = if ($IsAdmin) { 'machine' } else { 'user' }
 Write-Detail "Running as $(if ($IsAdmin) { 'administrator' } else { 'standard user' }); WinGet scope: $Scope"
 
-# ── 1. Terminal components ────────────────────────────────────────────────────
+# -- 1. Terminal components ----------------------------------------------------
 
 function Install-WinGetPackage {
     param(
@@ -342,6 +434,136 @@ function Resolve-TerminalFont {
     return $null
 }
 
+function Write-FontDiagnostics {
+    # Bug reports about missing glyphs are almost always "the font is not
+    # actually registered", so say plainly what is there.
+    $hives = [ordered]@{
+        'machine (HKLM)' = 'HKLM:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+        'user (HKCU)'    = 'HKCU:\SOFTWARE\Microsoft\Windows NT\CurrentVersion\Fonts'
+    }
+    foreach ($label in $hives.Keys) {
+        $matched = @()
+        $item = Get-ItemProperty -Path $hives[$label] -ErrorAction SilentlyContinue
+        if ($item) {
+            $matched = @($item.PSObject.Properties |
+                Where-Object { $_.Name -notlike 'PS*' -and ($_.Name -like '*Nerd Font*' -or $_.Name -like '*JetBrains*') } |
+                ForEach-Object { $_.Name })
+        }
+        if ($matched.Count -gt 0) {
+            Write-Detail "$label : $($matched.Count) Nerd Font entries, e.g. $($matched[0])"
+        } else {
+            Write-Detail "$label : no Nerd Font entries"
+        }
+    }
+}
+
+function Get-FontFamilyName {
+    # Reads the real family name out of the file, so the registry entry matches
+    # the face Windows Terminal will ask for. Returns $null if it cannot.
+    param([string]$Path)
+
+    try {
+        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
+        $collection = New-Object System.Drawing.Text.PrivateFontCollection
+        $collection.AddFontFile($Path)
+        $family = $collection.Families[0].Name
+        $collection.Dispose()
+        if ($family) { return $family }
+    } catch {
+        Write-Verbose "could not read a family name from $Path : $($_.Exception.Message)"
+    }
+    return $null
+}
+
+function Install-NerdFontPerUser {
+    <#
+      Installs JetBrainsMono Nerd Font for this user only, which needs no
+      administrator rights: the files go in the per-user font directory and are
+      registered under HKCU. Applications started afterwards can use them.
+
+      Used when WinGet cannot install the font, which is the normal case on a
+      managed machine because the package is machine-scope.
+    #>
+    $fontDirectory = Join-Path $env:LOCALAPPDATA 'Microsoft\Windows\Fonts'
+    $registryKey   = 'HKCU:\Software\Microsoft\Windows NT\CurrentVersion\Fonts'
+    $temp          = Join-Path ([IO.Path]::GetTempPath()) ('nerdfont-' + [Guid]::NewGuid().ToString('N'))
+    $archive       = Join-Path $temp 'JetBrainsMono.zip'
+
+    # Face name suffix per file, following the usual registry convention.
+    $faces = [ordered]@{
+        'Regular'    = ''
+        'Bold'       = ' Bold'
+        'Italic'     = ' Italic'
+        'BoldItalic' = ' Bold Italic'
+    }
+
+    try {
+        New-Item -ItemType Directory -Path $temp -Force | Out-Null
+        New-Item -ItemType Directory -Path $fontDirectory -Force | Out-Null
+        if (-not (Test-Path $registryKey)) { New-Item -Path $registryKey -Force | Out-Null }
+
+        $downloaded = $false
+        foreach ($url in $NerdFontUrls) {
+            try {
+                Write-Detail "downloading $url"
+                Invoke-WebRequest -Uri $url -OutFile $archive -UseBasicParsing
+                $downloaded = $true
+                break
+            } catch {
+                Write-Detail "download failed: $($_.Exception.Message)"
+            }
+        }
+        if (-not $downloaded) {
+            Write-Warn 'Could not download the Nerd Font archive.'
+            return $false
+        }
+
+        # Extract only the four faces needed. The archive carries well over a
+        # hundred, and unpacking all of them is slow for no benefit.
+        Add-Type -AssemblyName System.IO.Compression.FileSystem
+        $zip = [IO.Compression.ZipFile]::OpenRead($archive)
+        $installed = 0
+        try {
+            foreach ($style in $faces.Keys) {
+                # The trailing hyphen keeps the NerdFontMono and NerdFontPropo
+                # variants out; this is the proportional-spacing family that the
+                # terminal fragment names.
+                $wanted = "JetBrainsMonoNerdFont-$style.ttf"
+                $entry = $zip.Entries | Where-Object { $_.Name -eq $wanted } | Select-Object -First 1
+                if (-not $entry) { continue }
+
+                $target = Join-Path $fontDirectory $entry.Name
+                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+
+                $family = Get-FontFamilyName -Path $target
+                if (-not $family) { $family = 'JetBrainsMono Nerd Font' }
+
+                # A per-user entry holds the full path; HKLM entries hold only
+                # the file name.
+                New-ItemProperty -Path $registryKey -Name "$family$($faces[$style]) (TrueType)" `
+                    -Value $target -PropertyType String -Force | Out-Null
+                $installed++
+            }
+        } finally {
+            $zip.Dispose()
+        }
+
+        if ($installed -eq 0) {
+            Write-Warn 'The Nerd Font archive held none of the expected faces.'
+            return $false
+        }
+
+        Write-Ok "Installed $installed JetBrainsMono Nerd Font face(s) for this user."
+        Write-Detail "fonts  $fontDirectory"
+        return $true
+    } catch {
+        Write-Warn "Per-user font install failed: $($_.Exception.Message)"
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
 function Resolve-FallbackFont {
     # No Nerd Font is available, so pick a monospace face that is definitely
     # registered. Naming a font that is not installed makes Windows Terminal
@@ -359,24 +581,51 @@ function Resolve-FallbackFont {
 if (-not $SkipInstalls) {
     Write-Section 'Terminal components'
 
-    if (-not (Test-Command winget)) {
-        Write-Warn 'WinGet is unavailable. Skipping installs and continuing with certificates and config.'
+    $hasWinGet = Test-Command winget
+    if (-not $hasWinGet) {
+        Write-Warn 'WinGet is unavailable. Using per-user fallbacks where one exists.'
         Write-Detail 'Install "App Installer" from the Microsoft Store, or ask IT, then re-run.'
     } else {
         Install-WinGetPackage -Id 'Microsoft.WindowsTerminal' -DisplayName 'Windows Terminal' -Command 'wt.exe'  | Out-Null
         Install-WinGetPackage -Id 'Microsoft.PowerShell'      -DisplayName 'PowerShell 7'     -Command 'pwsh.exe' | Out-Null
         Install-WinGetPackage -Id 'Starship.Starship'         -DisplayName 'Starship'         -Command 'starship.exe' | Out-Null
+    }
 
-        if (-not (Resolve-TerminalFont)) {
-            Install-WinGetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont' -DisplayName 'JetBrains Mono Nerd Font' | Out-Null
-        } else {
-            Write-Ok "Nerd Font already present."
+    # Atuin: the same searchable history as macOS. WinGet publishes it as
+    # Atuinsh.Atuin; the release archive is the fallback.
+    if (Test-Command atuin) {
+        Write-Ok 'Atuin already present.'
+    } else {
+        $atuinInstalled = $false
+        if ($hasWinGet) {
+            $atuinInstalled = Install-WinGetPackage -Id 'Atuinsh.Atuin' -DisplayName 'Atuin' -Command 'atuin.exe'
+        }
+        if (-not $atuinInstalled) {
+            Install-FromGitHubZip -Url $AtuinReleaseUrl -ExeName 'atuin.exe' -DisplayName 'Atuin' | Out-Null
         }
     }
+
+    # Font. WinGet's package is machine-scope and usually refused on a managed
+    # machine, so fall through to the per-user install rather than giving up:
+    # without a Nerd Font every prompt icon renders as a box.
+    Write-Info 'Checking for a Nerd Font...'
+    Write-FontDiagnostics
+    if (Resolve-TerminalFont) {
+        Write-Ok 'Nerd Font already present.'
+    } else {
+        if ($hasWinGet) {
+            Install-WinGetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont' -DisplayName 'JetBrains Mono Nerd Font' | Out-Null
+        }
+        if (-not (Resolve-TerminalFont)) {
+            Write-Detail 'no Nerd Font registered yet, installing one for this user'
+            Install-NerdFontPerUser | Out-Null
+        }
+    }
+
     Update-SessionPath
 }
 
-# ── 2. Corporate TLS trust ────────────────────────────────────────────────────
+# -- 2. Corporate TLS trust ----------------------------------------------------
 
 function ConvertTo-Pem {
     param([Security.Cryptography.X509Certificates.X509Certificate2]$Certificate)
@@ -585,7 +834,7 @@ if (-not $SkipCerts) {
     }
 }
 
-# ── 3. Configuration ──────────────────────────────────────────────────────────
+# -- 3. Configuration ----------------------------------------------------------
 
 $PowerShellProfileContent = @'
 # Work machine PowerShell profile. Managed by dotfiles/windows/work-setup.ps1.
@@ -604,7 +853,7 @@ $env:DOTNET_CLI_TELEMETRY_OPTOUT = 1
 $env:DOTNET_NOLOGO = 1
 $env:AZURE_CORE_COLLECT_TELEMETRY = 0
 
-# ── History and editing ───────────────────────────────────────────────────────
+# -- History and editing -------------------------------------------------------
 if (Get-Module -ListAvailable -Name PSReadLine) {
     Import-Module PSReadLine
     Set-PSReadLineOption -EditMode Windows
@@ -612,9 +861,11 @@ if (Get-Module -ListAvailable -Name PSReadLine) {
     Set-PSReadLineOption -HistorySearchCursorMovesToEnd
     Set-PSReadLineOption -BellStyle None
 
-    # Never persist a command that looks like it carries a secret.
+    # Never persist a command that starts with a space (same as zsh's
+    # HIST_IGNORE_SPACE on macOS) or that looks like it carries a secret.
     Set-PSReadLineOption -AddToHistoryHandler {
         param($line)
+        if ($line -match '^\s') { return $false }
         $sensitive = 'password', 'secret', 'token', 'apikey', 'api-key', 'connectionstring', '--key'
         foreach ($word in $sensitive) {
             if ($line -like "*$word*") { return $false }
@@ -635,14 +886,86 @@ if (Get-Module -ListAvailable -Name PSReadLine) {
     Set-PSReadLineKeyHandler -Key DownArrow -Function HistorySearchForward
 }
 
-# ── Aliases ───────────────────────────────────────────────────────────────────
+# -- Listing colours -----------------------------------------------------------
+# PowerShell 7 paints directory names with a solid blue background. Use bold
+# blue text instead, matching eza on macOS.
+if ($PSStyle) {
+    $PSStyle.FileInfo.Directory = "$([char]27)[1;34m"
+}
+
+# -- Aliases -------------------------------------------------------------------
 function .. { Set-Location .. }
 function ... { Set-Location ..\.. }
-function ll { Get-ChildItem -Force @args }
 function which { param($name) (Get-Command $name -ErrorAction SilentlyContinue).Source }
 function g { & git @args }
 
-# ── Completions ───────────────────────────────────────────────────────────────
+# Same aliases as macOS when the tools are installed, built-ins otherwise.
+if (Get-Command eza -CommandType Application -ErrorAction SilentlyContinue) {
+    Remove-Item Alias:ls -Force -ErrorAction SilentlyContinue
+    function ls { eza --icons --group-directories-first @args }
+    function ll { eza -la --icons --group-directories-first @args }
+} else {
+    function ll { Get-ChildItem -Force @args }
+}
+
+if (Get-Command bat -CommandType Application -ErrorAction SilentlyContinue) {
+    Remove-Item Alias:cat -Force -ErrorAction SilentlyContinue
+    function cat { bat @args }
+}
+
+# zoxide: smarter cd. Use 'z' instead of 'cd'.
+if (Get-Command zoxide -CommandType Application -ErrorAction SilentlyContinue) {
+    Invoke-Expression (& { (zoxide init powershell | Out-String) })
+}
+
+# -- Local LLM (Ollama + llm) --------------------------------------------------
+# Everything runs on this machine. Conversation logging is turned off by
+# work-setup.ps1, and commands starting with a space are not saved to history.
+$script:LlmExe = (Get-Command llm -CommandType Application -ErrorAction SilentlyContinue |
+    Select-Object -First 1).Source
+
+if ($script:LlmExe) {
+    # 'llm cmd <request>': suggest a PowerShell command, show it, run it only
+    # after confirmation. Mirrors the llm-cmd plugin used on macOS.
+    function Invoke-LlmCommand {
+        param([string]$Request)
+        $system = 'Reply with one PowerShell 7 command for Windows that does what the user asks. ' +
+                  'Output only the command, with no explanation and no code fences.'
+        $suggestion = (& $script:LlmExe -s $system $Request | Out-String).Trim()
+        # Keep only the fenced block if the model added one anyway.
+        if ($suggestion -match '```[a-zA-Z]*\s*([\s\S]*?)```') { $suggestion = $Matches[1].Trim() }
+        if (-not $suggestion) { Write-Host 'No suggestion returned.'; return }
+        Write-Host ''
+        Write-Host "  $suggestion" -ForegroundColor Yellow
+        Write-Host ''
+        if ((Read-Host 'Run it? [y/N]') -match '^[Yy]$') {
+            & ([scriptblock]::Create($suggestion))
+        }
+    }
+
+    function llm {
+        if ($args.Count -gt 0 -and $args[0] -eq 'cmd') {
+            Invoke-LlmCommand (($args | Select-Object -Skip 1) -join ' ')
+        } elseif ($MyInvocation.ExpectingInput) {
+            $input | & $script:LlmExe @args
+        } else {
+            & $script:LlmExe @args
+        }
+    }
+
+    # wtf: rerun the last command and ask the local model why it failed.
+    # It reruns the command, so avoid it after anything destructive.
+    function wtf {
+        $last = Get-History -Count 1
+        if (-not $last) { Write-Host 'No previous command.'; return }
+        $command = $last.CommandLine
+        $output = try { & ([scriptblock]::Create($command)) 2>&1 | Out-String } catch { $_ | Out-String }
+        $tail = ($output -split "`r?`n" | Select-Object -Last 100) -join "`n"
+        $tail | & $script:LlmExe "I ran this in PowerShell: $command`nExplain what went wrong and how to fix it."
+    }
+}
+
+# -- Completions ---------------------------------------------------------------
 # dotnet CLI tab completion, per Microsoft's documented snippet.
 Register-ArgumentCompleter -Native -CommandName dotnet -ScriptBlock {
     param($wordToComplete, $commandAst, $cursorPosition)
@@ -651,8 +974,9 @@ Register-ArgumentCompleter -Native -CommandName dotnet -ScriptBlock {
     }
 }
 
-# ── Prompt and history search ─────────────────────────────────────────────────
-# Atuin is optional. If it is ever installed, this picks it up automatically.
+# -- Prompt and history search -------------------------------------------------
+# Searchable shell history on Ctrl-R and Up Arrow, stored locally. The guard
+# keeps this profile working if Atuin could not be installed.
 if (Get-Command atuin -ErrorAction SilentlyContinue) {
     atuin init powershell | Out-String | Invoke-Expression
 }
@@ -660,6 +984,44 @@ if (Get-Command atuin -ErrorAction SilentlyContinue) {
 if (Get-Command starship -ErrorAction SilentlyContinue) {
     Invoke-Expression (&starship init powershell)
 }
+'@
+
+$AtuinContent = @'
+# Atuin shell history. Same settings as mac/config/atuin.toml.
+dialect = "uk"
+timezone = "local"
+
+search_mode = "fuzzy"
+search_mode_shell_up_key_binding = "prefix"
+filter_mode = "global"
+filter_mode_shell_up_key_binding = "directory"
+workspaces = true
+
+style = "compact"
+inline_height = 30
+show_preview = true
+
+enter_accept = false
+store_failed = true
+
+# Privacy. secrets_filter drops anything shaped like a credential. The
+# history_filter entries are regular expressions matched against the whole
+# command line; the first is the leading-space convention from zsh's
+# HIST_IGNORE_SPACE, so prefixing a command with a space keeps it out of
+# history. Single quotes are TOML literal strings, so the backslash is literal.
+secrets_filter = true
+history_filter = [
+  '^\s',
+  '(?i)password',
+  '(?i)secret',
+  '(?i)token',
+  '(?i)api[-_]?key',
+]
+
+# History never leaves this machine: no account, no server, no update ping.
+# Do not run "atuin login".
+auto_sync = false
+update_check = false
 '@
 
 $StarshipContent = @'
@@ -677,39 +1039,39 @@ style = "bold #89b4fa"
 format = "[$path]($style)"
 truncation_length = 2
 truncate_to_repo = true
-read_only = " 󰌾"
+read_only = " \U000F033E"
 
 [git_branch]
-symbol = " "
+symbol = "\uE0A0 "
 style = "#cba6f7"
 format = " [$symbol$branch]($style)"
 truncation_length = 32
-truncation_symbol = "…"
+truncation_symbol = "\u2026"
 
 [git_status]
 style = "#f9e2af"
 format = " [$all_status$ahead_behind]($style)"
 conflicted = "="
-ahead = "⇡${count}"
-behind = "⇣${count}"
-diverged = "⇕${ahead_count}/${behind_count}"
+ahead = "\u21E1${count}"
+behind = "\u21E3${count}"
+diverged = "\u21D5${ahead_count}/${behind_count}"
 up_to_date = ""
 untracked = "?"
 stashed = "\\$"
 modified = "!"
 staged = "+"
-renamed = "»"
-deleted = "×"
+renamed = "\u00BB"
+deleted = "\u00D7"
 
 # Only renders in a Node project.
 [nodejs]
-symbol = " "
+symbol = "\uE718 "
 style = "#a6e3a1"
 format = "[$symbol$version]($style) "
 
 # Only renders next to a .csproj, .sln or global.json.
 [dotnet]
-symbol = " "
+symbol = "\uE77F "
 style = "#cba6f7"
 format = "[$symbol($version )($tfm )]($style)"
 heuristic = true
@@ -717,7 +1079,7 @@ heuristic = true
 # Only renders when the Docker context is not the default one, so a normal
 # Docker Desktop setup stays silent.
 [docker_context]
-symbol = " "
+symbol = "\uE7B0 "
 style = "#89dceb"
 format = "[$symbol$context]($style) "
 only_with_files = true
@@ -738,9 +1100,9 @@ style = "dimmed #6c7086"
 format = "[$duration]($style) "
 
 [character]
-success_symbol = " [❯](bold #a6e3a1)"
-error_symbol = " [❯](bold #f38ba8)"
-vimcmd_symbol = " [❮](bold #cba6f7)"
+success_symbol = " [\u276F](bold #a6e3a1)"
+error_symbol = " [\u276F](bold #f38ba8)"
+vimcmd_symbol = " [\u276E](bold #cba6f7)"
 '@
 
 if (-not $SkipConfig) {
@@ -820,7 +1182,21 @@ if (-not $SkipConfig) {
 
     Install-Config -Path $profilePath  -Content $PowerShellProfileContent
     Install-Config -Path (Join-Path $HOME '.config\starship.toml') -Content $StarshipContent
+    Install-Config -Path (Join-Path $HOME '.config\atuin\config.toml') -Content $AtuinContent
     Install-Config -Path $fragmentPath -Content $terminalFragment
+
+    # The PowerShell integration arrived well before any version WinGet carries,
+    # but say so plainly rather than leaving a silent no-op in the profile.
+    if (Test-Command atuin) {
+        $atuinInit = (Invoke-Native -FilePath 'atuin' -ArgumentList @('init', 'powershell'))
+        if ($atuinInit -eq 0) {
+            Write-Ok "Atuin history search enabled ($((& atuin --version) -join ' '))."
+        } else {
+            Write-Warn 'This Atuin build does not support "atuin init powershell"; history search is off.'
+        }
+    } else {
+        Write-Warn 'Atuin is not installed, so Ctrl-R falls back to PSReadLine search.'
+    }
 
     if ($documents -like '*OneDrive*') {
         Write-Warn 'Your Documents folder is redirected to OneDrive.'
@@ -828,19 +1204,246 @@ if (-not $SkipConfig) {
     }
 }
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# -- 4. Local LLM --------------------------------------------------------------
+
+function Invoke-NativeLive {
+    # Like Invoke-Native, but lets progress output (model downloads) through.
+    param(
+        [Parameter(Mandatory)][string]$FilePath,
+        [string[]]$ArgumentList = @()
+    )
+    $ErrorActionPreference = 'Continue'
+    try {
+        & $FilePath @ArgumentList | Out-Host
+        return $LASTEXITCODE
+    } catch {
+        Write-Warn "$FilePath failed: $($_.Exception.Message)"
+        return 1
+    }
+}
+
+function Test-OllamaReady {
+    return (Invoke-Native -FilePath 'ollama' -ArgumentList @('list')) -eq 0
+}
+
+function Start-OllamaServer {
+    # The tray app normally runs the server. Start one if it is not up, and
+    # give it a few seconds: a cold start has to load its runners first.
+    if (Test-OllamaReady) { return $true }
+    try {
+        Start-Process -FilePath 'ollama' -ArgumentList 'serve' -WindowStyle Hidden
+    } catch {
+        Write-Detail "could not start ollama serve: $($_.Exception.Message)"
+    }
+    foreach ($attempt in 1..20) {
+        if (Test-OllamaReady) { return $true }
+        Start-Sleep -Seconds 1
+    }
+    return $false
+}
+
+function Restart-OllamaServer {
+    # OLLAMA_* is read once at startup, so a server that is already running
+    # keeps the old settings until it is restarted.
+    Write-Detail 'restarting Ollama so the new settings take effect'
+    foreach ($processName in @('ollama app', 'ollama')) {
+        Get-Process -Name $processName -ErrorAction SilentlyContinue |
+            Stop-Process -Force -ErrorAction SilentlyContinue
+    }
+    Start-Sleep -Seconds 2
+    return (Start-OllamaServer)
+}
+
+function Get-NvidiaVramGb {
+    # Dedicated VRAM on the largest NVIDIA GPU, or $null when there is none.
+    # nvidia-smi ships with the driver and reports whole MiB.
+    if (-not (Test-Command 'nvidia-smi')) { return $null }
+    try {
+        $ErrorActionPreference = 'Continue'
+        $reported = & nvidia-smi --query-gpu=memory.total --format=csv,noheader,nounits 2>$null
+        $largest = @($reported | ForEach-Object { $_ -as [int] } | Where-Object { $_ }) |
+            Sort-Object -Descending | Select-Object -First 1
+        if (-not $largest) { return $null }
+        return [math]::Round($largest / 1024)
+    } catch {
+        return $null
+    }
+}
+
+if (-not $SkipLlm) {
+    Write-Section 'Local LLM'
+
+    # uv fetches Python and llm over TLS. Behind an inspecting proxy it must
+    # read the Windows trust store instead of its own bundled roots. This
+    # verifies certificates as normal, it just trusts the right ones.
+    [Environment]::SetEnvironmentVariable('UV_NATIVE_TLS', '1', 'User')
+    $env:UV_NATIVE_TLS = '1'
+
+    # Ollama settings, persisted as user environment variables. On Windows
+    # these survive a reboot, which is what launchctl does for the Mac setup.
+    #
+    # OLLAMA_HOST binds the server to loopback, so nothing on the corporate
+    # network can reach it. Leave "Expose Ollama to the network" switched off
+    # in the Ollama app as well, and never sign in to an Ollama account: this
+    # setup is entirely local and uses no cloud models.
+    $ollamaSettings = [ordered]@{
+        'OLLAMA_HOST'              = '127.0.0.1:11434'  # loopback only
+        'OLLAMA_FLASH_ATTENTION'   = '1'                # faster attention kernels
+        'OLLAMA_KV_CACHE_TYPE'     = 'q8_0'             # smaller KV cache, more context per GB
+        'OLLAMA_NUM_PARALLEL'      = '1'                # one request at a time
+        'OLLAMA_MAX_LOADED_MODELS' = '1'                # never hold two models in memory
+    }
+    $ollamaSettingsChanged = $false
+    foreach ($name in $ollamaSettings.Keys) {
+        $value = $ollamaSettings[$name]
+        if ([Environment]::GetEnvironmentVariable($name, 'User') -ne $value) {
+            $ollamaSettingsChanged = $true
+        }
+        [Environment]::SetEnvironmentVariable($name, $value, 'User')
+        Set-Item -Path "Env:\$name" -Value $value
+    }
+    Write-Ok 'Ollama pinned to 127.0.0.1:11434, one model loaded, q8_0 KV cache.'
+
+    $llmReady = $true
+
+    if (-not $SkipInstalls -and (Test-Command winget)) {
+        # Both install per-user without administrator rights.
+        if (-not (Install-WinGetPackage -Id 'Ollama.Ollama' -DisplayName 'Ollama' -Command 'ollama.exe')) { $llmReady = $false }
+        if (-not (Install-WinGetPackage -Id 'astral-sh.uv'  -DisplayName 'uv'     -Command 'uv.exe'))     { $llmReady = $false }
+    }
+
+    # uv installs tools into ~/.local/bin; make sure that is on PATH.
+    $uvBin = Join-Path $HOME '.local\bin'
+    if (Test-Command uv) {
+        Invoke-Native -FilePath 'uv' -ArgumentList @('tool', 'update-shell') | Out-Null
+        if ($env:Path -notlike "*$uvBin*") { $env:Path = "$uvBin;$env:Path" }
+        Update-SessionPath
+    }
+
+    if (-not (Test-Command ollama) -or -not (Test-Command uv)) {
+        Write-Warn 'Ollama or uv is missing, so the local LLM was not set up.'
+        Write-Detail 'Install them (winget install Ollama.Ollama / astral-sh.uv), then re-run.'
+        $llmReady = $false
+    }
+
+    if ($llmReady) {
+        # The llm CLI with the Ollama plugin, as an isolated uv tool.
+        if (-not (Test-Command llm)) {
+            Write-Info 'Installing the llm CLI...'
+            $code = Invoke-NativeLive -FilePath 'uv' -ArgumentList @('tool', 'install', 'llm', '--with', 'llm-ollama')
+            Update-SessionPath
+            if ($env:Path -notlike "*$uvBin*") { $env:Path = "$uvBin;$env:Path" }
+            if ($code -ne 0 -or -not (Test-Command llm)) {
+                Write-Warn 'Could not install the llm CLI.'
+                $llmReady = $false
+            } else {
+                Write-Ok 'llm installed with the llm-ollama plugin.'
+            }
+        } else {
+            Write-Ok 'llm already present.'
+        }
+    }
+
+    if ($llmReady) {
+        # Privacy: never store prompts or replies.
+        Invoke-Native -FilePath 'llm' -ArgumentList @('logs', 'off') | Out-Null
+        Write-Ok 'llm conversation logging turned off.'
+
+        # A server that was already running predates the settings above.
+        $serverUp = if ($ollamaSettingsChanged -and (Test-OllamaReady)) {
+            Restart-OllamaServer
+        } else {
+            Start-OllamaServer
+        }
+        if (-not $serverUp) {
+            Write-Warn 'The Ollama server did not start. Open Ollama from the Start menu, then re-run.'
+            $llmReady = $false
+        }
+    }
+
+    if ($llmReady) {
+        # Report the hardware Ollama will actually use. A laptop GPU rarely has
+        # room for a model this size, so most layers run on the CPU and the
+        # split is worth seeing. Check it later with: ollama ps
+        $ramGb  = [math]::Round((Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory / 1GB)
+        $vramGb = Get-NvidiaVramGb
+        if ($vramGb) {
+            Write-Detail "hardware: ${ramGb}GB RAM, ${vramGb}GB dedicated NVIDIA VRAM"
+        } else {
+            Write-Detail "hardware: ${ramGb}GB RAM, no NVIDIA GPU detected (CPU inference)"
+        }
+
+        # gemma4:26b is a mixture-of-experts model: only a few billion of its
+        # parameters are active per token, so it stays usable even when the
+        # weights do not fit in VRAM and most layers fall back to the CPU. That
+        # is the normal case on a laptop GPU. Override with -LlmModel, for
+        # example -LlmModel gemma4:12b on a machine with less memory.
+        $baseModel = if ($LlmModel) { $LlmModel } else { 'gemma4:26b' }
+        Write-Info "Using $baseModel."
+
+        if (-not $LlmModel -and $ramGb -lt 24) {
+            Write-Warn "$baseModel needs roughly 17GB resident and this machine reports ${ramGb}GB."
+            Write-Detail 'If it swaps, re-run with: -LlmModel gemma4:12b'
+        }
+        Write-Detail 'first run downloads about 19GB, so allow time on a throttled link'
+
+        # 16K context: Ollama's 4K default silently cuts off pasted code.
+        $modelfile = Join-Path ([IO.Path]::GetTempPath()) 'terminal-llm.Modelfile'
+        Write-TextFile -Path $modelfile -Content "FROM $baseModel`nPARAMETER num_ctx 16384`n"
+
+        $steps = @(
+            @{ File = 'ollama'; Args = @('pull', $baseModel); Live = $true },
+            @{ File = 'ollama'; Args = @('create', 'terminal-llm', '-f', $modelfile); Live = $false },
+            @{ File = 'llm';    Args = @('models', 'default', 'terminal-llm'); Live = $false },
+            # Thinking off for quick answers; turn on per prompt with -o think true.
+            @{ File = 'llm';    Args = @('models', 'options', 'set', 'terminal-llm', 'think', 'false'); Live = $false }
+        )
+        $failed = $false
+        foreach ($step in $steps) {
+            $code = if ($step.Live) { Invoke-NativeLive -FilePath $step.File -ArgumentList $step.Args }
+                    else { Invoke-Native -FilePath $step.File -ArgumentList $step.Args }
+            if ($code -ne 0) {
+                Write-Warn "Failed: $($step.File) $($step.Args -join ' ')"
+                $failed = $true
+                break
+            }
+        }
+        Remove-Item -LiteralPath $modelfile -ErrorAction SilentlyContinue
+
+        if (-not $failed) {
+            Write-Ok "Local LLM ready: terminal-llm ($baseModel, 16K context, thinking off)."
+        }
+    }
+}
+
+# -- Summary -------------------------------------------------------------------
 
 Write-Section 'Font check'
-Write-Host '   If the next line shows boxes, the Nerd Font is not active yet:'
-Write-Host "           󰌾  " -ForegroundColor Magenta
+Write-Host '   If the next line shows boxes, the Nerd Font is not active yet.'
+Write-Host '   Close every Windows Terminal window first: a per-user font is only'
+Write-Host '   picked up by applications started after it was registered.'
+# Built from code points rather than written literally, so this script stays
+# pure ASCII and cannot be mangled by a shell that misreads its encoding.
+$glyphs = @(0xE718, 0xE0B0, 0xE7B0, 0xE0A0, 0xE77F, 0xF033E) | ForEach-Object { [char]::ConvertFromUtf32($_) }
+Write-Host ('           ' + ($glyphs -join '  ')) -ForegroundColor Magenta
 
 Write-Section 'Done'
 Write-Host 'Next:'
 Write-Host '  1. Close and reopen Windows Terminal.'
 Write-Host '  2. Pick "Work PowerShell" from the new-tab dropdown, then set it as'
 Write-Host '     default under Settings > Startup > Default profile.'
-Write-Host '  3. Open a NEW terminal so the certificate variables are inherited.'
+Write-Host '  3. Open a NEW terminal so the environment variables are inherited.'
 Write-Host '  4. Verify TLS: npm ping, az account show, git ls-remote <a repo>'
+Write-Host '  5. Check everything at once: pwsh -NoProfile -File .\verify-work-setup.ps1'
+if (-not $SkipLlm) {
+    Write-Host ''
+    Write-Host 'Local LLM:'
+    Write-Detail '  ask       llm "Say hi in five words"'
+    Write-Detail '  suggest   llm cmd show the current date      (asks before running)'
+    Write-Detail '  explain   wtf                                (reruns the last command)'
+    Write-Detail '  split     ollama ps                          (how much is on the GPU)'
+    Write-Detail '  private   runs locally, logging off, no account, loopback only'
+}
 if (-not $SkipCerts) {
     Write-Host ''
     Write-Host 'Certificates:'
