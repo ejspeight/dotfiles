@@ -15,12 +15,11 @@
 set -e
 source "${${(%):-%x}:A:h}/lib.sh"
 
-MODULE_ORDER=(terminal dev apps llm)
+MODULE_ORDER=(terminal dev llm)
 
 typeset -A MODULE_SUMMARY=(
   terminal "Ghostty, zsh, Starship, Atuin, and the shell tools"
   dev      "Node, Go, Python, Rust, Neovim, Docker, databases, AWS CLI"
-  apps     "1Password, Raycast, Rectangle, DBeaver, .NET SDK, Codex"
   llm      "Ollama and a local terminal model"
 )
 
@@ -31,7 +30,6 @@ Usage: ./setup.sh [modules] [options]
 Modules:
   --terminal   ${MODULE_SUMMARY[terminal]}
   --dev        ${MODULE_SUMMARY[dev]}
-  --apps       ${MODULE_SUMMARY[apps]}
   --llm        ${MODULE_SUMMARY[llm]}
   --all        Everything above
 
@@ -49,7 +47,7 @@ typeset -a requested
 
 while (( $# )); do
   case "$1" in
-    --terminal|--dev|--apps|--llm) requested+=("${1#--}") ;;
+    --terminal|--dev|--llm) requested+=("${1#--}") ;;
     --all)      requested=("${MODULE_ORDER[@]}") ;;
     --dry-run)  export DOTFILES_DRY_RUN=1 ;;
     -h|--help)  usage; DOTFILES_SUPPRESS_STEPS=1; exit 0 ;;
@@ -85,10 +83,9 @@ if (( ${#requested} == 0 )); then
   for choice in ${(s: :)${reply//,/ }}; do
     case "$choice" in
       a|all)                         requested=("${MODULE_ORDER[@]}") ;;
-      terminal|dev|apps|llm)         requested+=("$choice") ;;
-      <1-4>)                         requested+=("${MODULE_ORDER[$choice]}") ;;
+      terminal|dev|llm)              requested+=("$choice") ;;
       *)
-        # A run of digits with no separators, such as "13".
+        # One or more digits, together or apart: "2", "1 3", "13".
         if [[ "$choice" == <-> ]]; then
           for digit in ${(s::)choice}; do
             if (( digit >= 1 && digit <= ${#MODULE_ORDER} )); then
