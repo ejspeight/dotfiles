@@ -995,6 +995,11 @@ $script:LlmExe = (Get-Command llm -CommandType Application -ErrorAction Silently
     Select-Object -First 1).Source
 
 if ($script:LlmExe) {
+    $script:LlmCliSubcommands = @(
+        'aliases', 'collections', 'embed', 'install', 'keys', 'logs',
+        'models', 'plugins', 'schemas', 'similar', 'templates', 'uninstall'
+    )
+
     # 'llm cmd <request>': suggest a PowerShell command, show it, run it only
     # after confirmation. Mirrors the llm-cmd plugin used on macOS.
     function Invoke-LlmCommand {
@@ -1016,10 +1021,16 @@ if ($script:LlmExe) {
     function llm {
         if ($args.Count -gt 0 -and $args[0] -eq 'cmd') {
             Invoke-LlmCommand (($args | Select-Object -Skip 1) -join ' ')
+        } elseif ($args.Count -gt 0 -and ($args[0] -like '-*' -or $script:LlmCliSubcommands -contains $args[0])) {
+            if ($MyInvocation.ExpectingInput) {
+                $input | & $script:LlmExe @args
+            } else {
+                & $script:LlmExe @args
+            }
         } elseif ($MyInvocation.ExpectingInput) {
-            $input | & $script:LlmExe @args
+            $input | & $script:LlmExe -m terminal-llm @args
         } else {
-            & $script:LlmExe @args
+            & $script:LlmExe -m terminal-llm @args
         }
     }
 
@@ -1276,6 +1287,8 @@ if (-not $SkipConfig) {
 
 # -- 4. Local LLM --------------------------------------------------------------
 
+$script:LocalLlmReady = $false
+
 function Invoke-NativeLive {
     # Like Invoke-Native, but lets progress output (model downloads) through.
     param(
@@ -1448,19 +1461,23 @@ if (-not $SkipLlm) {
             Write-Detail "hardware: ${ramGb}GB RAM, no NVIDIA GPU detected (CPU inference)"
         }
 
-        # gemma4:26b is a mixture-of-experts model: only a few billion of its
-        # parameters are active per token, so it stays usable even when the
-        # weights do not fit in VRAM and most layers fall back to the CPU. That
-        # is the normal case on a laptop GPU. Override with -LlmModel, for
-        # example -LlmModel gemma4:12b on a machine with less memory.
-        $baseModel = if ($LlmModel) { $LlmModel } else { 'gemma4:26b' }
+        # Pick a model that fits the machine's RAM, matching the macOS setup.
+        # Override with -LlmModel if you want to force a specific Ollama tag.
+        if ($LlmModel) {
+            $baseModel = $LlmModel
+        } elseif ($ramGb -ge 32) {
+            $baseModel = 'gemma4:26b'  # about 16GB
+        } elseif ($ramGb -ge 16) {
+            $baseModel = 'gemma4:12b'  # about 8GB
+        } else {
+            $baseModel = 'gemma4:e4b'  # small model for 8GB machines
+        }
         Write-Info "Using $baseModel."
 
-        if (-not $LlmModel -and $ramGb -lt 24) {
-            Write-Warn "$baseModel needs roughly 17GB resident and this machine reports ${ramGb}GB."
-            Write-Detail 'If it swaps, re-run with: -LlmModel gemma4:12b'
+        if (-not $LlmModel -and $baseModel -ne 'gemma4:26b') {
+            Write-Detail "chose $baseModel because this machine reports ${ramGb}GB RAM"
         }
-        Write-Detail 'first run downloads about 19GB, so allow time on a throttled link'
+        Write-Detail 'first run downloads several GB, so allow time on a throttled link'
 
         # 16K context: Ollama's 4K default silently cuts off pasted code.
         $modelfile = Join-Path ([IO.Path]::GetTempPath()) 'terminal-llm.Modelfile'
@@ -1479,6 +1496,11 @@ if (-not $SkipLlm) {
                     else { Invoke-Native -FilePath $step.File -ArgumentList $step.Args }
             if ($code -ne 0) {
                 Write-Warn "Failed: $($step.File) $($step.Args -join ' ')"
+                if ($step.File -eq 'ollama' -and $step.Args[0] -eq 'pull') {
+                    Write-Detail 'Ollama model blobs are redirected to *.r2.cloudflarestorage.com.'
+                    Write-Detail 'If the pull reports EOF immediately, ask IT to allow that host category for Ollama downloads.'
+                    Write-Detail 'A network that allows registry.ollama.ai but blocks Cloudflare R2 produces this exact failure.'
+                }
                 $failed = $true
                 break
             }
@@ -1486,6 +1508,7 @@ if (-not $SkipLlm) {
         Remove-Item -LiteralPath $modelfile -ErrorAction SilentlyContinue
 
         if (-not $failed) {
+            $script:LocalLlmReady = $true
             Write-Ok "Local LLM ready: terminal-llm ($baseModel, 16K context, thinking off)."
         }
     }
@@ -1514,11 +1537,16 @@ Write-Host '     (no -NoProfile: several checks look at what the profile defines
 if (-not $SkipLlm) {
     Write-Host ''
     Write-Host 'Local LLM:'
-    Write-Detail '  ask       llm "Say hi in five words"'
-    Write-Detail '  suggest   llm cmd show the current date      (asks before running)'
-    Write-Detail '  explain   wtf                                (reruns the last command)'
-    Write-Detail '  split     ollama ps                          (how much is on the GPU)'
-    Write-Detail '  private   runs locally, logging off, no account, loopback only'
+    if ($script:LocalLlmReady) {
+        Write-Detail '  ask       llm "Say hi in five words"'
+        Write-Detail '  suggest   llm cmd show the current date      (asks before running)'
+        Write-Detail '  explain   wtf                                (reruns the last command)'
+        Write-Detail '  split     ollama ps                          (how much is on the GPU)'
+        Write-Detail '  private   runs locally, logging off, no account, loopback only'
+    } else {
+        Write-Detail '  not ready yet; re-run this script so Ollama can finish pulling and building terminal-llm'
+        Write-Detail '  to force a smaller model, try: .\work-setup.ps1 -SkipInstalls -LlmModel gemma4:e4b'
+    }
 }
 if (-not $SkipCerts) {
     Write-Host ''

@@ -244,12 +244,17 @@ llm -o think true "harder question"  # thinking on, just this once
 ollama ps                            # how much of the model is on the GPU
 ```
 
-`gemma4:26b` is the default. It is a mixture-of-experts model, so only a few
-billion of its parameters are active per token and it stays usable even when the
-weights do not fit in VRAM and most layers run on the CPU, which is the normal
-case on a laptop GPU. The first run downloads roughly 19GB, so allow time on a
-throttled link. Pick something else with `-LlmModel`, for example
-`-LlmModel gemma4:12b` on a machine with less memory.
+The Windows script uses the same RAM-based model choice as macOS: `gemma4:e4b`
+below 16GB, `gemma4:12b` below 32GB, and `gemma4:26b` at 32GB or more. The
+first run downloads several GB, so allow time on a throttled link. Pick
+something else with `-LlmModel`, for example `-LlmModel gemma4:e4b` if a larger
+download keeps failing.
+
+Ollama first contacts `registry.ollama.ai`, then follows a signed download URL
+to `*.r2.cloudflarestorage.com`. On managed networks, both must be allowed. If
+`ollama pull` fails immediately with `max retries exceeded: EOF`, ask IT to
+allow the Cloudflare R2 host category for Ollama model downloads; changing the
+model size does not help when that redirect is blocked.
 
 To compare models on your own hardware before settling:
 

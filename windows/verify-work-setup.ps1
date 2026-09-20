@@ -398,14 +398,18 @@ if (Test-Command llm) {
     Write-Detail 'llm "Say hi in five words" ->'
     $answer = try { (& llm 'Say hi in five words' 2>&1 | Out-String).Trim() } catch { "ERROR: $($_.Exception.Message)" }
     Write-Host "       $answer" -ForegroundColor Cyan
-    if ($answer -match '(?i)<think>|^Thinking') { Write-Fail 'the answer contains thinking output' }
+    if ($answer -match '(?i)No key found|OPENAI_API_KEY') { Write-Fail 'llm fell back to OpenAI instead of the local Ollama model' }
+    elseif ($answer -match '(?i)model.*terminal-llm.*not found|not found.*terminal-llm') { Write-Fail 'terminal-llm is not built yet; re-run work-setup.ps1 so Ollama can finish pulling the model' }
+    elseif ($answer -match '(?i)<think>|^Thinking') { Write-Fail 'the answer contains thinking output' }
     elseif ($answer) { Write-Pass 'the model answered' }
     else { Write-Fail 'the model returned nothing' }
 
     Write-Detail 'pipe test: "the cat sat on the mat" | llm "summarise in two words" ->'
     $piped = try { ('the cat sat on the mat' | llm 'summarise in two words' 2>&1 | Out-String).Trim() } catch { "ERROR: $($_.Exception.Message)" }
     Write-Host "       $piped" -ForegroundColor Cyan
-    if ($piped -and $piped -notmatch '^ERROR') { Write-Pass 'the llm wrapper handles piped input' }
+    if ($piped -match '(?i)No key found|OPENAI_API_KEY') { Write-Fail 'piped llm fell back to OpenAI instead of the local Ollama model' }
+    elseif ($piped -match '(?i)model.*terminal-llm.*not found|not found.*terminal-llm') { Write-Fail 'terminal-llm is not built yet; piped llm cannot run locally' }
+    elseif ($piped -and $piped -notmatch '^ERROR') { Write-Pass 'the llm wrapper handles piped input' }
     else { Write-Fail 'piping into llm failed' }
 }
 
