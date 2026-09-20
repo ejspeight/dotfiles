@@ -412,18 +412,27 @@ function ConvertTo-FontFamilyName {
 }
 
 function Resolve-TerminalFont {
-    # Preferred faces first, then any other Nerd Font already on the machine.
-    # Returns $null when no Nerd Font is installed.
+    <#
+      The best Nerd Font already on the machine, or $null if there is none.
+
+      -PreferredOnly narrows it to JetBrainsMono, the face the macOS setup uses.
+      Windows ships Cascadia Mono NF, which is a perfectly good Nerd Font, so
+      without this the script would always find one and never install the face
+      that was actually asked for.
+    #>
+    param([switch]$PreferredOnly)
+
     $preferences = @(
-        @{ Face = 'JetBrainsMono Nerd Font'; Match = 'JetBrainsMono*Nerd Font*' },
-        @{ Face = 'CaskaydiaCove Nerd Font'; Match = 'CaskaydiaCove*Nerd Font*' },
-        @{ Face = 'Cascadia Mono NF';        Match = 'Cascadia Mono NF*' },
-        @{ Face = 'Cascadia Code NF';        Match = 'Cascadia Code NF*' },
-        @{ Face = $null;                     Match = '*Nerd Font*' }
+        @{ Face = 'JetBrainsMono Nerd Font'; Match = 'JetBrainsMono*Nerd Font*'; Preferred = $true },
+        @{ Face = 'CaskaydiaCove Nerd Font'; Match = 'CaskaydiaCove*Nerd Font*'; Preferred = $false },
+        @{ Face = 'Cascadia Mono NF';        Match = 'Cascadia Mono NF*';        Preferred = $false },
+        @{ Face = 'Cascadia Code NF';        Match = 'Cascadia Code NF*';        Preferred = $false },
+        @{ Face = $null;                     Match = '*Nerd Font*';              Preferred = $false }
     )
 
     $installed = Get-InstalledFontNames
     foreach ($preference in $preferences) {
+        if ($PreferredOnly -and -not $preference.Preferred) { continue }
         foreach ($name in $installed) {
             if ($name -like $preference.Match) {
                 if ($preference.Face) { return $preference.Face }
@@ -446,13 +455,13 @@ function Write-FontDiagnostics {
         $item = Get-ItemProperty -Path $hives[$label] -ErrorAction SilentlyContinue
         if ($item) {
             $matched = @($item.PSObject.Properties |
-                Where-Object { $_.Name -notlike 'PS*' -and ($_.Name -like '*Nerd Font*' -or $_.Name -like '*JetBrains*') } |
+                Where-Object { $_.Name -notlike 'PS*' -and ($_.Name -like '*Nerd*' -or $_.Name -like '*JetBrains*' -or $_.Name -like '*Cascadia*') } |
                 ForEach-Object { $_.Name })
         }
         if ($matched.Count -gt 0) {
-            Write-Detail "$label : $($matched.Count) Nerd Font entries, e.g. $($matched[0])"
+            Write-Detail "$label : $($matched.Count) candidate font entries, e.g. $($matched[0])"
         } else {
-            Write-Detail "$label : no Nerd Font entries"
+            Write-Detail "$label : no Nerd Font or Cascadia entries"
         }
     }
 }
@@ -610,15 +619,23 @@ if (-not $SkipInstalls) {
     # without a Nerd Font every prompt icon renders as a box.
     Write-Info 'Checking for a Nerd Font...'
     Write-FontDiagnostics
-    if (Resolve-TerminalFont) {
-        Write-Ok 'Nerd Font already present.'
+    if (Resolve-TerminalFont -PreferredOnly) {
+        Write-Ok 'JetBrainsMono Nerd Font already present.'
     } else {
+        $alternative = Resolve-TerminalFont
+        if ($alternative) {
+            Write-Detail "only $alternative is installed; fetching JetBrainsMono to match the macOS setup"
+        }
         if ($hasWinGet) {
             Install-WinGetPackage -Id 'DEVCOM.JetBrainsMonoNerdFont' -DisplayName 'JetBrains Mono Nerd Font' | Out-Null
         }
-        if (-not (Resolve-TerminalFont)) {
-            Write-Detail 'no Nerd Font registered yet, installing one for this user'
-            Install-NerdFontPerUser | Out-Null
+        # The WinGet package installs machine-wide, so a managed device normally
+        # refuses it. Fall through to the per-user install rather than settling.
+        if (-not (Resolve-TerminalFont -PreferredOnly)) {
+            Write-Detail 'installing JetBrainsMono Nerd Font for this user'
+            if (-not (Install-NerdFontPerUser) -and $alternative) {
+                Write-Detail "keeping $alternative, which already renders prompt glyphs"
+            }
         }
     }
 
@@ -1434,7 +1451,8 @@ Write-Host '  2. Pick "Work PowerShell" from the new-tab dropdown, then set it a
 Write-Host '     default under Settings > Startup > Default profile.'
 Write-Host '  3. Open a NEW terminal so the environment variables are inherited.'
 Write-Host '  4. Verify TLS: npm ping, az account show, git ls-remote <a repo>'
-Write-Host '  5. Check everything at once: pwsh -NoProfile -File .\verify-work-setup.ps1'
+Write-Host '  5. Check everything at once: pwsh -File .\verify-work-setup.ps1'
+Write-Host '     (no -NoProfile: several checks look at what the profile defines)'
 if (-not $SkipLlm) {
     Write-Host ''
     Write-Host 'Local LLM:'
