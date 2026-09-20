@@ -160,6 +160,20 @@ install_config() {
   chmod "$mode" "$target_file"
 }
 
+seed_config() {
+    # For files the repo provides a starting point for but does not own, such as
+    # your Neovim keymaps and options. install_config replaces on every run,
+    # which is right for config the repo owns; this one leaves your edits alone.
+    local target_file="$2"
+
+    if [ -e "$target_file" ]; then
+        info "kept your existing ${target_file/#$HOME/~}"
+        return 0
+    fi
+
+    install_config "$@"
+}
+
 # ── Homebrew ──────────────────────────────────────────────────────────────────
 ensure_homebrew() {
   if command -v brew &>/dev/null; then

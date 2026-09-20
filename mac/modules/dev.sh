@@ -87,95 +87,30 @@ else
   next_step "Restart your terminal, then run: rustup-init"
 fi
 
-if dry_run; then
-  info "[dry run] write the LazyVim config to ~/.config/nvim"
-else
-# ── LazyVim ───────────────────────────────────────────────────────────────────
-info "Setting up LazyVim (Neovim config)..."
+# -- Neovim (LazyVim) ----------------------------------------------------------
+info "Installing the Neovim config..."
 
 NVIM_CONFIG="$HOME/.config/nvim"
 
-if [ -d "$NVIM_CONFIG" ]; then
-  warn "~/.config/nvim already exists — skipping to avoid overwriting."
-  warn "To start fresh: rm -rf ~/.config/nvim ~/.local/share/nvim ~/.cache/nvim"
-else
-  mkdir -p "$NVIM_CONFIG/lua/config"
-  mkdir -p "$NVIM_CONFIG/lua/plugins"
-
-  cat > "$NVIM_CONFIG/init.lua" << 'EOF'
--- Bootstrap lazy.nvim, LazyVim and your plugins
-require("config.lazy")
-EOF
-
-  cat > "$NVIM_CONFIG/lua/config/lazy.lua" << 'EOF'
-local lazypath = vim.fn.stdpath("data") .. "/lazy/lazy.nvim"
-if not (vim.uv or vim.loop).fs_stat(lazypath) then
-  local lazyrepo = "https://github.com/folke/lazy.nvim.git"
-  local out = vim.fn.system({ "git", "clone", "--filter=blob:none", "--branch=stable", lazyrepo, lazypath })
-  if vim.v.shell_error ~= 0 then
-    vim.api.nvim_echo({
-      { "Failed to clone lazy.nvim:\n", "ErrorMsg" },
-      { out, "WarningMsg" },
-      { "\nPress any key to exit..." },
-    }, true, {})
-    vim.fn.getchar()
-    os.exit(1)
-  end
-end
-vim.opt.rtp:prepend(lazypath)
-
-require("lazy").setup({
-  spec = {
-    { "LazyVim/LazyVim", import = "lazyvim.plugins" },
-    { import = "plugins" },
-  },
-  defaults = {
-    lazy = false,
-    version = false,
-  },
-  install = { colorscheme = { "tokyonight", "habamax" } },
-  checker = {
-    enabled = true,
-    notify = false,
-  },
-  performance = {
-    rtp = {
-      disabled_plugins = {
-        "gzip",
-        "tarPlugin",
-        "tohtml",
-        "tutor",
-        "zipPlugin",
-      },
-    },
-  },
-})
-EOF
-
-  cat > "$NVIM_CONFIG/lua/config/options.lua" << 'EOF'
--- Options are automatically loaded before lazy.nvim startup
--- Add any additional options here
-EOF
-
-  cat > "$NVIM_CONFIG/lua/config/keymaps.lua" << 'EOF'
--- Keymaps are automatically loaded on the VeryLazy event
--- Add any additional keymaps here
-EOF
-
-  cat > "$NVIM_CONFIG/lua/config/autocmds.lua" << 'EOF'
--- Autocmds are automatically loaded on the VeryLazy event
--- Add any additional autocmds here
-EOF
-
-  cat > "$NVIM_CONFIG/lua/plugins/init.lua" << 'EOF'
--- Add your custom plugins here
-return {}
-EOF
-
-  success "LazyVim config written to ~/.config/nvim"
-  info "Plugins will auto-install on first launch of nvim."
+# A config that is not this one is about to have its entry points replaced.
+# install_config backs them up first, but say so before doing it.
+if [ -f "$NVIM_CONFIG/init.lua" ] && ! grep -q 'config.lazy' "$NVIM_CONFIG/init.lua" 2>/dev/null; then
+  warn "~/.config/nvim holds a Neovim config that is not this one."
+  warn "init.lua and lua/config/lazy.lua will be replaced (backed up first)."
 fi
-fi
+
+# The bootstrap is machinery the repo owns, so it is replaced on every run, the
+# same way ~/.zshrc is. That is what lets a fix here reach a machine that is
+# already set up.
+install_config "$CONFIG_DIR/nvim/init.lua"            "$NVIM_CONFIG/init.lua"
+install_config "$CONFIG_DIR/nvim/lua/config/lazy.lua" "$NVIM_CONFIG/lua/config/lazy.lua"
+
+# These four are meant to be edited. Seed them once, then leave them alone, so
+# your own options and keymaps survive a re-run.
+seed_config "$CONFIG_DIR/nvim/lua/config/options.lua"  "$NVIM_CONFIG/lua/config/options.lua"
+seed_config "$CONFIG_DIR/nvim/lua/config/keymaps.lua"  "$NVIM_CONFIG/lua/config/keymaps.lua"
+seed_config "$CONFIG_DIR/nvim/lua/config/autocmds.lua" "$NVIM_CONFIG/lua/config/autocmds.lua"
+seed_config "$CONFIG_DIR/nvim/lua/plugins/init.lua"    "$NVIM_CONFIG/lua/plugins/init.lua"
 
 next_step "Open nvim — LazyVim plugins install automatically on first launch"
 next_step "Configure AWS credentials: aws configure"

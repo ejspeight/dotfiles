@@ -47,6 +47,14 @@ Sources live in [`mac/config`](mac/config):
 | `atuin.toml` | `~/.config/atuin/config.toml` |
 | `ghostty/config.ghostty` | `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` |
 | `ollama/Modelfile` | built into the `terminal-llm` Ollama model |
+| `nvim/` | `~/.config/nvim/` (see below) |
+
+Most config is replaced on every run, with the previous version backed up, so a
+fix in this repo reaches a machine that is already set up. Neovim is split: the
+bootstrap (`init.lua`, `lua/config/lazy.lua`) is replaced, while the four files
+you are meant to edit — `options.lua`, `keymaps.lua`, `autocmds.lua` and
+`lua/plugins/init.lua` — are only seeded when missing, so your own settings
+survive. Generated files like `lazy-lock.json` are never touched.
 
 The shell config degrades on its own: `ls` and `cat` stay as the real commands
 when `eza` and `bat` are absent, and SSH is untouched without 1Password.
