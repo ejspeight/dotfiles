@@ -25,9 +25,15 @@ alias python="python3"
 alias pip="pip3"
 
 # ── Better shell tools ────────────────────────────────────────────────────────
-alias ls="eza --icons --group-directories-first"
-alias ll="eza -la --icons --group-directories-first"
-alias cat="bat"
+# Guarded, so a machine set up without these still has a working ls and cat.
+if command -v eza >/dev/null 2>&1; then
+  alias ls="eza --icons --group-directories-first"
+  alias ll="eza -la --icons --group-directories-first"
+fi
+
+if command -v bat >/dev/null 2>&1; then
+  alias cat="bat"
+fi
 
 # fzf shell integration
 [ -f "/opt/homebrew/opt/fzf/shell/completion.zsh" ] && source "/opt/homebrew/opt/fzf/shell/completion.zsh"
@@ -39,8 +45,13 @@ if command -v zoxide >/dev/null 2>&1; then
 fi
 
 # ── 1Password SSH Agent ───────────────────────────────────────────────────────
-# Requires 1Password with the SSH agent enabled. Comment out if unused.
-export SSH_AUTH_SOCK="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/agent.sock"
+# Only when the agent is actually running: exporting this unconditionally
+# points ssh at a socket that may not exist and breaks all key auth.
+_op_agent_sock="$HOME/Library/Group Containers/2BUA8C4S2C.com.1password/agent.sock"
+if [ -S "$_op_agent_sock" ]; then
+  export SSH_AUTH_SOCK="$_op_agent_sock"
+fi
+unset _op_agent_sock
 
 # ── Local LLM (Ollama + llm) ──────────────────────────────────────────────────
 # Commands starting with a space are not saved to history (for private prompts).

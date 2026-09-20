@@ -36,6 +36,11 @@
   ~/.config-backups/dotfiles-<timestamp>/ before replacement, and the Windows
   Terminal fragment adds a profile without rewriting settings.json.
 
+.PARAMETER Terminal
+  Terminal only: install the components and write the configuration, but skip
+  the corporate certificate work and the local LLM. Equivalent to
+  -SkipCerts -SkipLlm, with a name that says what it is for.
+
 .PARAMETER SkipInstalls
   Skip all WinGet installs and only apply certificates and configuration.
 
@@ -72,12 +77,17 @@
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1 -SkipInstalls
 
 .EXAMPLE
+  # Just the terminal: no certificate changes, no model download.
+  powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1 -Terminal
+
+.EXAMPLE
   # Roll back the certificate environment variables.
   powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1 -RemoveCertEnv
 #>
 
 [CmdletBinding()]
 param(
+    [switch]$Terminal,
     [switch]$SkipInstalls,
     [switch]$SkipCerts,
     [switch]$SkipConfig,
@@ -105,6 +115,14 @@ $ProgressPreference = 'SilentlyContinue'
 # itself so it can degrade gracefully, so opt out where the setting exists.
 if (Test-Path Variable:\PSNativeCommandUseErrorActionPreference) {
     $PSNativeCommandUseErrorActionPreference = $false
+}
+
+# -Terminal is a preset over the individual switches rather than a separate
+# code path: the terminal and its configuration, without the corporate
+# certificate work or the 19GB model download.
+if ($Terminal) {
+    $SkipCerts = $true
+    $SkipLlm   = $true
 }
 
 # -- Paths ---------------------------------------------------------------------
@@ -909,7 +927,7 @@ if (-not $SkipCerts) {
 $PowerShellProfileContent = @'
 # Work machine PowerShell profile. Managed by dotfiles/windows/work-setup.ps1.
 
-# Keep portable tool configuration on the same paths used on macOS and Linux.
+# Keep portable tool configuration on the same paths used on macOS.
 $env:STARSHIP_CONFIG = Join-Path $HOME '.config\starship.toml'
 $env:ATUIN_CONFIG_DIR = Join-Path $HOME '.config\atuin'
 

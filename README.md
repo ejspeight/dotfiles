@@ -2,27 +2,57 @@
 
 Personal machine setup scripts for getting a new machine up and running.
 
+Both platforms are modular: install the terminal on its own, or the whole
+environment, or anything in between. Nothing is all-or-nothing.
+
 ## Mac
 
-Sets up a full dev environment including Ghostty, Codex, a minimal Catppuccin Starship prompt, searchable shell history, Neovim (LazyVim), Node, .NET, Rust, Go, and more.
+Pick what you want. Each module is a script that also runs on its own, so "just
+give me a terminal" does not drag in Docker, Postgres and a 19GB model.
 
 ```bash
 cd mac
 chmod +x setup.sh && ./setup.sh
 ```
 
-### What gets installed
+With no arguments it asks which modules you want. To skip the menu:
 
-- **Homebrew:** package manager and all formulae
-- **Neovim:** with [LazyVim](https://www.lazyvim.org) (plugins auto-install on first launch)
-- **Terminal:** Ghostty with Catppuccin Mocha, JetBrains Mono Nerd Font, transparency and blur
-- **Prompt:** minimal Starship layout with project, Git status, Node version and command duration
-- **Shell:** Oh My Zsh, zsh-autosuggestions, zsh-syntax-highlighting, Atuin history and command-only typo correction
-- **Languages:** Node (via nvm), Go, Rust (via rustup), Python, .NET SDK
-- **Shell tools:** fzf, ripgrep, fd, bat, eza, zoxide, jq, lazygit, gh
-- **AI:** Codex CLI application; its configuration and credentials remain local
-- **Local LLM:** Ollama and the `llm` CLI, with a model chosen to fit the Mac's memory (see [Local LLM](#local-llm))
-- **Apps:** Ghostty, Codex, Raycast, Rectangle, DBeaver, 1Password
+```bash
+./setup.sh --terminal              # one module
+./setup.sh --terminal --dev        # several
+./setup.sh --all                   # everything
+./setup.sh --all --dry-run         # show what would happen, change nothing
+```
+
+Or run a single module directly, which is the easiest thing to hand someone:
+
+```bash
+./modules/terminal.sh
+```
+
+### Modules
+
+| Module | What it installs |
+|---|---|
+| `terminal` | Ghostty, zsh with Oh My Zsh, Starship, Atuin, git, fzf, ripgrep, fd, bat, eza, zoxide, jq, tree, htop, wget, JetBrains Mono Nerd Font, and all the shell configuration |
+| `dev` | Neovim with LazyVim, Node via nvm, Go, Python, Rust, gh, lazygit, git-flow, Docker, MySQL, Postgres, AWS CLI |
+| `apps` | 1Password, Raycast, Rectangle, DBeaver, .NET SDK, Codex |
+| `llm` | Ollama and the `llm` CLI, with a local model sized to the Mac's memory |
+
+Every module installs Homebrew first if it is missing, so any of them works on
+a bare machine. Re-running is safe: packages already present are skipped, and
+existing config is backed up before replacement.
+
+No module depends on another. The shell configuration degrades on its own when
+a tool is absent, so `ls` and `cat` keep working on a `terminal`-only machine
+that has no `eza` or `bat`, and SSH is left alone when 1Password is not there.
+
+Each module adds to a list of things only you can do — signing in, enabling an
+agent, starting a database — and that list is printed, numbered, at the end of
+whatever you ran.
+
+`--dry-run` works on `setup.sh` and on every module, and is the quickest way to
+see what a module would touch before letting it.
 
 ### Terminal configuration
 
@@ -38,24 +68,16 @@ The editable source files live under [`mac/config`](mac/config):
 | `ghostty/config.ghostty` | `~/Library/Application Support/com.mitchellh.ghostty/config.ghostty` | Font, theme, transparency and window behaviour |
 
 Existing config files are copied to `~/.config-backups/dotfiles-<timestamp>/`
-before replacement. The setup does not read, copy or modify Codex configuration
-or credentials, and this repository does not track them.
-
-### After running
-
-1. Quit and reopen Ghostty, then run `exec zsh -l`
-2. Run `codex login` and sign in with ChatGPT
-3. Open `nvim`; LazyVim plugins install automatically
-4. Enable the SSH agent in 1Password settings
-5. Run `aws configure` to set up AWS credentials
-6. Test the local LLM: `llm "Say hi in five words"`
+before replacement, with one backup directory per run however many modules it
+covers. The setup does not read, copy or modify Codex configuration or
+credentials, and this repository does not track them.
 
 ### Local LLM
 
 A private terminal assistant that runs entirely on the Mac. Prompts are never
 sent to a cloud service.
 
-`setup.sh` installs [Ollama](https://ollama.com) and the
+The `llm` module installs [Ollama](https://ollama.com) and the
 [`llm`](https://llm.datasette.io) CLI, then picks a model based on the Mac's
 memory:
 
@@ -63,14 +85,14 @@ memory:
 |---|---|---|
 | 8GB | `gemma4:e4b` | ~3GB |
 | 16GB to 24GB | `gemma4:12b` | ~8GB |
-| 32GB or more | `gemma4:26b` | ~16GB |
+| 32GB or more | `gemma4:26b` | ~19GB |
 
 The chosen model is saved as `terminal-llm` with a 16K context window, set as
 the `llm` default, and has thinking turned off for faster answers. To use a
 different model, pass any [Ollama tag](https://ollama.com/library):
 
 ```bash
-LOCAL_LLM_MODEL=qwen3.6:35b-a3b ./setup.sh
+LOCAL_LLM_MODEL=qwen3.6:35b-a3b ./modules/llm.sh
 ```
 
 **Usage**
@@ -92,36 +114,10 @@ llm -o think true "why does this leak memory?"   # let the model think first
 
 Run `ollama ps` while the model is loaded. `100% GPU` is what you want. A
 CPU/GPU split means the model does not fit in memory, so close memory-heavy
-apps or rerun the setup with a smaller `LOCAL_LLM_MODEL`.
+apps or rerun with a smaller `LOCAL_LLM_MODEL`.
 
-## Linux
 
-Minimal base setup for Ubuntu/Debian. Installs core tools via apt, then builds up the same shell environment as Mac.
-
-```bash
-cd linux
-chmod +x setup.sh && ./setup.sh
-```
-
-### What gets installed
-
-- **apt packages:** git, neovim, zsh, ripgrep, fd, fzf, bat, htop, jq, Go, and more
-- **lazygit:** latest binary from GitHub releases
-- **gh:** GitHub CLI via official apt repo
-- **eza:** better `ls` via eza apt repo
-- **zoxide:** smarter `cd`
-- **Neovim:** with [LazyVim](https://www.lazyvim.org) (plugins auto-install on first launch)
-- **Oh My Zsh:** with zsh-autosuggestions, zsh-syntax-highlighting, eastwood theme
-- **Languages:** Node (via nvm), Rust (via rustup), Go
-- **Shell tools:** fzf, ripgrep, fd, bat, eza, zoxide, jq, lazygit, gh
-
-### After running
-
-1. Restart your terminal (or `exec zsh`)
-2. Open `nvim`; LazyVim plugins install automatically
-3. Run `nvm install 23` if Node wasn't set up during the script
-
-## Windows (work / managed machine)
+## Windows (work machine)
 
 For a corporate machine where the toolchain is already installed and the real
 friction is TLS inspection and the lack of administrator rights. It touches the
@@ -129,10 +125,18 @@ terminal only, never languages, runtimes or SDKs.
 
 `work-setup.ps1` is self-contained: it embeds its own PowerShell profile,
 Starship config, Atuin config and Windows Terminal fragment, so it can be copied
-to the client machine on its own without cloning this repository.
+to the client machine on its own without cloning this repository. That is why
+Windows has one script rather than the Mac's modules — the file has to stand
+alone on a machine you cannot clone a repository onto.
 
 ```powershell
 powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1
+```
+
+For the terminal alone, with no certificate changes and no model download:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1 -Terminal
 ```
 
 Then open a **new** terminal and check the result. Run this one without
@@ -315,6 +319,7 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\work-setup.ps1 -Remove
 
 | Switch | Effect |
 |---|---|
+| `-Terminal` | Terminal and config only: no certificate work, no local LLM |
 | `-SkipInstalls` | Certificates and config only, for a locked-down machine |
 | `-SkipCerts` | Terminal setup without touching trust settings |
 | `-SkipConfig` | Installs and certificates only, leaving your config files alone |
@@ -360,53 +365,3 @@ already written badly:
 - Existing files are backed up to `~/.config-backups/dotfiles-<timestamp>/`
   before replacement, and the Windows Terminal fragment adds a profile without
   rewriting `settings.json`.
-
-
-## Windows (personal / new device)
-
-Sets up a native Windows developer terminal with the same minimal Catppuccin
-prompt as the Mac. Ghostty does not currently support Windows, so this setup
-uses Windows Terminal with PowerShell 7 instead.
-
-Open PowerShell in the cloned repository, then run:
-
-```powershell
-cd windows
-powershell.exe -NoProfile -ExecutionPolicy Bypass -File .\setup.ps1
-```
-
-Use `-SkipCodex` if you do not want the script to install Codex CLI.
-
-### What gets installed
-
-- **Terminal:** Windows Terminal with a dedicated transparent Catppuccin Mocha developer profile
-- **Shell:** PowerShell 7 with PSReadLine history suggestions and Atuin search
-- **Prompt:** the same minimal Starship layout with project, Git status, Node version and command duration
-- **Font:** JetBrains Mono Nerd Font for prompt symbols
-- **Core tools:** Git and Node.js LTS through WinGet
-- **AI:** Codex CLI through npm after Node and npm are verified
-
-### Terminal configuration
-
-The editable source files live under [`windows/config`](windows/config):
-
-| File | Installed to | Purpose |
-|---|---|---|
-| `Microsoft.PowerShell_profile.ps1` | `~/Documents/PowerShell/Microsoft.PowerShell_profile.ps1` | PSReadLine, Atuin and Starship startup |
-| `starship.toml` | `~/.config/starship.toml` | Minimal prompt layout and Catppuccin colours |
-| `atuin.toml` | `~/.config/atuin/config.toml` | History search and key behaviour |
-| `windows-terminal.fragment.json` | `%LOCALAPPDATA%/Microsoft/Windows Terminal/Fragments/eddie-dotfiles/developer.json` | Adds the Developer PowerShell profile and Catppuccin colour scheme |
-
-Existing config files are copied to
-`~/.config-backups/dotfiles-<timestamp>/` before replacement. The Windows
-Terminal fragment adds a new profile without rewriting the user's main
-`settings.json`. The setup does not read, copy or modify Codex configuration or
-credentials, and this repository does not track them.
-
-### After running
-
-1. Close and reopen Windows Terminal
-2. Select **Developer PowerShell** from the new-tab menu
-3. Optionally make it the default under **Settings > Startup**
-4. Run `codex login` to connect ChatGPT
-5. Run `atuin login` if you want history sync

@@ -1,5 +1,8 @@
 # Codex configuration and credentials are machine-local and must never be tracked.
 .codex/
 **/.codex/
-mac/config/codex/
-windows/config/codex/
+**/config/codex/
+
+# Scratch output from assistant sessions: stale copies of files that live in
+# this repo for real, and a public repo is the wrong place for them.
+Claude outputs/
