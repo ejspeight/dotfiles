@@ -129,6 +129,11 @@ $CertEnvNames = @(
 # download; nothing here weakens certificate checking.
 $AtuinReleaseUrl = 'https://github.com/atuinsh/atuin/releases/latest/download/atuin-x86_64-pc-windows-msvc.zip'
 
+# WinGet fetches Ollama's installer from ollama.com, which an inspecting proxy
+# may refuse outright (HTTP 403). This archive is the same build, served from
+# github.com, and unpacks without an installer. It is around 1.5GB.
+$OllamaReleaseUrl = 'https://github.com/ollama/ollama/releases/latest/download/ollama-windows-amd64.zip'
+
 # Pinned first so a new upstream release cannot change what gets installed,
 # with the moving URL as a fallback if the tag is ever withdrawn.
 $NerdFontUrls = @(
@@ -261,6 +266,59 @@ function Install-FromGitHubZip {
         Copy-Item -LiteralPath $exe.FullName -Destination (Join-Path $binDirectory $ExeName) -Force
         Add-UserPathEntry -Directory $binDirectory
         Write-Ok "$DisplayName installed to $binDirectory."
+        return $true
+    } catch {
+        Write-Warn "Could not install $DisplayName from its release archive: $($_.Exception.Message)"
+        return $false
+    } finally {
+        Remove-Item -LiteralPath $temp -Recurse -Force -ErrorAction SilentlyContinue
+    }
+}
+
+function Install-ArchiveToLocal {
+    <#
+      Per-user fallback for a tool that needs more than a single executable:
+      unpack a whole release archive under ~/.local and put the directory
+      holding its executable on PATH. No administrator rights, no installer.
+    #>
+    param(
+        [Parameter(Mandatory)][string]$Url,
+        [Parameter(Mandatory)][string]$Name,
+        [Parameter(Mandatory)][string]$ExeName,
+        [Parameter(Mandatory)][string]$DisplayName
+    )
+
+    $destination = Join-Path $HOME ".local\$Name"
+    $existing = if (Test-Path -LiteralPath $destination) {
+        Get-ChildItem -LiteralPath $destination -Recurse -Filter $ExeName -File -ErrorAction SilentlyContinue |
+            Select-Object -First 1
+    }
+    if ($existing) {
+        Add-UserPathEntry -Directory $existing.DirectoryName
+        Write-Ok "$DisplayName already unpacked in $destination."
+        return $true
+    }
+
+    $temp = Join-Path ([IO.Path]::GetTempPath()) ('dotfiles-' + [Guid]::NewGuid().ToString('N'))
+    try {
+        New-Item -ItemType Directory -Path $temp -Force | Out-Null
+        New-Item -ItemType Directory -Path $destination -Force | Out-Null
+
+        $archive = Join-Path $temp 'download.zip'
+        Write-Detail "downloading $Url"
+        Write-Detail 'this is a large archive, so it stays quiet for a while'
+        Invoke-WebRequest -Uri $Url -OutFile $archive -UseBasicParsing
+        Expand-Archive -LiteralPath $archive -DestinationPath $destination -Force
+
+        $exe = Get-ChildItem -LiteralPath $destination -Recurse -Filter $ExeName -File |
+            Select-Object -First 1
+        if (-not $exe) {
+            Write-Warn "The $DisplayName archive did not contain $ExeName."
+            return $false
+        }
+
+        Add-UserPathEntry -Directory $exe.DirectoryName
+        Write-Ok "$DisplayName unpacked into $destination."
         return $true
     } catch {
         Write-Warn "Could not install $DisplayName from its release archive: $($_.Exception.Message)"
@@ -466,24 +524,6 @@ function Write-FontDiagnostics {
     }
 }
 
-function Get-FontFamilyName {
-    # Reads the real family name out of the file, so the registry entry matches
-    # the face Windows Terminal will ask for. Returns $null if it cannot.
-    param([string]$Path)
-
-    try {
-        Add-Type -AssemblyName System.Drawing -ErrorAction Stop
-        $collection = New-Object System.Drawing.Text.PrivateFontCollection
-        $collection.AddFontFile($Path)
-        $family = $collection.Families[0].Name
-        $collection.Dispose()
-        if ($family) { return $family }
-    } catch {
-        Write-Verbose "could not read a family name from $Path : $($_.Exception.Message)"
-    }
-    return $null
-}
-
 function Install-NerdFontPerUser {
     <#
       Installs JetBrainsMono Nerd Font for this user only, which needs no
@@ -534,24 +574,37 @@ function Install-NerdFontPerUser {
         $installed = 0
         try {
             foreach ($style in $faces.Keys) {
-                # The trailing hyphen keeps the NerdFontMono and NerdFontPropo
-                # variants out; this is the proportional-spacing family that the
-                # terminal fragment names.
-                $wanted = "JetBrainsMonoNerdFont-$style.ttf"
-                $entry = $zip.Entries | Where-Object { $_.Name -eq $wanted } | Select-Object -First 1
-                if (-not $entry) { continue }
+                # Each face is handled on its own: Windows locks a font file
+                # while it is loaded, and one locked face must not stop the rest.
+                try {
+                    # The trailing hyphen keeps the NerdFontMono and NerdFontPropo
+                    # variants out; this is the proportional-spacing family that
+                    # the terminal fragment names.
+                    $wanted = "JetBrainsMonoNerdFont-$style.ttf"
+                    $entry = $zip.Entries | Where-Object { $_.Name -eq $wanted } | Select-Object -First 1
+                    if (-not $entry) { continue }
 
-                $target = Join-Path $fontDirectory $entry.Name
-                [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+                    # A complete file left by an earlier run is already what we
+                    # want, and may well be locked. Keep it and just register it.
+                    $target = Join-Path $fontDirectory $entry.Name
+                    $alreadyThere = (Test-Path -LiteralPath $target) -and
+                                    ((Get-Item -LiteralPath $target).Length -eq $entry.Length)
+                    if ($alreadyThere) {
+                        Write-Detail "$style : already on disk, registering it"
+                    } else {
+                        [IO.Compression.ZipFileExtensions]::ExtractToFile($entry, $target, $true)
+                    }
 
-                $family = Get-FontFamilyName -Path $target
-                if (-not $family) { $family = 'JetBrainsMono Nerd Font' }
-
-                # A per-user entry holds the full path; HKLM entries hold only
-                # the file name.
-                New-ItemProperty -Path $registryKey -Name "$family$($faces[$style]) (TrueType)" `
-                    -Value $target -PropertyType String -Force | Out-Null
-                $installed++
+                    # A per-user entry holds the full path; HKLM entries hold
+                    # only the file name. The label has to contain both
+                    # "JetBrainsMono" and "Nerd Font" or Resolve-TerminalFont
+                    # will not match it.
+                    New-ItemProperty -Path $registryKey -Name "JetBrainsMono Nerd Font$($faces[$style]) (TrueType)" `
+                        -Value $target -PropertyType String -Force | Out-Null
+                    $installed++
+                } catch {
+                    Write-Detail "$style : $($_.Exception.Message)"
+                }
             }
         } finally {
             $zip.Dispose()
@@ -1325,8 +1378,13 @@ if (-not $SkipLlm) {
 
     if (-not $SkipInstalls -and (Test-Command winget)) {
         # Both install per-user without administrator rights.
-        if (-not (Install-WinGetPackage -Id 'Ollama.Ollama' -DisplayName 'Ollama' -Command 'ollama.exe')) { $llmReady = $false }
-        if (-not (Install-WinGetPackage -Id 'astral-sh.uv'  -DisplayName 'uv'     -Command 'uv.exe'))     { $llmReady = $false }
+        if (-not (Install-WinGetPackage -Id 'Ollama.Ollama' -DisplayName 'Ollama' -Command 'ollama.exe')) {
+            # Usually a blocked download rather than a blocked package, so try
+            # the release archive on github.com before giving up.
+            Write-Detail 'falling back to the Ollama release archive'
+            Install-ArchiveToLocal -Url $OllamaReleaseUrl -Name 'ollama' -ExeName 'ollama.exe' -DisplayName 'Ollama' | Out-Null
+        }
+        Install-WinGetPackage -Id 'astral-sh.uv' -DisplayName 'uv' -Command 'uv.exe' | Out-Null
     }
 
     # uv installs tools into ~/.local/bin; make sure that is on PATH.
